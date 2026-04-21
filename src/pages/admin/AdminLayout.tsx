@@ -25,6 +25,7 @@ import {
   NotebookPen,
   Database,
   Euro,
+  Mail,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -93,6 +94,12 @@ const NAV_KEYS = [
     to: "/admin/mensajes-trabajadores",
     labelKey: "admin.layout.nav_worker_messages_admin",
     icon: MessageSquare,
+    roles: ["ADMIN"] as const,
+  },
+  {
+    to: "/admin/mensajes-contacto-web",
+    labelKey: "admin.layout.nav_contact_web",
+    icon: Mail,
     roles: ["ADMIN"] as const,
   },
   {

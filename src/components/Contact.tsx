@@ -2,10 +2,12 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
-import { Mail, MapPin, Send } from "lucide-react";
+import { Send } from "lucide-react";
 import { useState } from "react";
 import { z } from "zod";
 import { toast } from "sonner";
+import { submitContactMessage } from "@/api/contactSubmissionsApi";
+import { isSupabaseConfigured } from "@/lib/supabaseClient";
 
 const schema = z.object({
   name: z.string().trim().min(2, "Introduce tu nombre").max(100),
@@ -17,7 +19,7 @@ const schema = z.object({
 const Contact = () => {
   const [submitting, setSubmitting] = useState(false);
 
-  const onSubmit = (e: React.FormEvent<HTMLFormElement>) => {
+  const onSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     const form = e.currentTarget;
     const data = Object.fromEntries(new FormData(form));
@@ -26,12 +28,27 @@ const Contact = () => {
       toast.error(parsed.error.issues[0].message);
       return;
     }
+    if (!isSupabaseConfigured()) {
+      toast.error("El formulario no está disponible (falta configurar Supabase).");
+      return;
+    }
     setSubmitting(true);
-    setTimeout(() => {
+    try {
+      await submitContactMessage({
+        name: parsed.data.name,
+        email: parsed.data.email,
+        company: parsed.data.company ?? "",
+        message: parsed.data.message,
+        source: "main",
+      });
       toast.success("¡Mensaje enviado! Te responderemos lo antes posible.");
       form.reset();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "No se pudo enviar el mensaje.";
+      toast.error(msg);
+    } finally {
       setSubmitting(false);
-    }, 600);
+    }
   };
 
   return (
@@ -46,24 +63,6 @@ const Contact = () => {
             <p className="mt-4 text-muted-foreground text-lg">
               Cuéntanos qué tienes en mente. Te respondemos en menos de 24 horas laborables.
             </p>
-
-            <div className="mt-10 space-y-5">
-              <a
-                href="mailto:info@ejmslab.com"
-                className="flex items-center gap-4 text-foreground hover:text-primary transition-smooth"
-              >
-                <span className="inline-flex h-11 w-11 items-center justify-center rounded-lg bg-primary/10 text-primary ring-1 ring-primary/20">
-                  <Mail className="h-5 w-5" />
-                </span>
-                info@ejmslab.com
-              </a>
-              <div className="flex items-center gap-4 text-muted-foreground">
-                <span className="inline-flex h-11 w-11 items-center justify-center rounded-lg bg-primary/10 text-primary ring-1 ring-primary/20">
-                  <MapPin className="h-5 w-5" />
-                </span>
-                España
-              </div>
-            </div>
           </div>
 
           <form

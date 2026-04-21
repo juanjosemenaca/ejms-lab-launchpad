@@ -83,6 +83,7 @@
     "nav_worker_time_clock_correction": "Request correction",
     "nav_worker_time_clock_history": "Time clock history",
     "nav_worker_messages_admin": "Worker messages",
+    "nav_contact_web": "Website contact",
     "nav_time_clock_admin": "Time clock control",
     "nav_time_clock_hub": "Time clock",
     "nav_time_clock_reports": "Time clock reports",
@@ -143,6 +144,24 @@
     "validation_min": "At least 8 characters",
     "validation_match": "Passwords do not match",
     "save_error": "Could not save the password."
+  },
+  "contactSubmissions": {
+    "title": "Website contact messages",
+    "subtitle": "Messages sent from the public contact form.",
+    "col_date": "Date",
+    "col_name": "Name",
+    "col_email": "Email",
+    "col_company": "Company",
+    "col_message": "Message",
+    "col_source": "Source",
+    "empty": "No messages yet.",
+    "load_error": "Could not load messages",
+    "delete": "Delete",
+    "view": "View",
+    "dialog_title": "Contact message",
+    "toast_deleted": "Message deleted.",
+    "delete_confirm_title": "Delete this message?",
+    "delete_confirm_desc": "This cannot be undone."
   },
   "auth": {
     "supabase_not_configured": "Supabase is not configured.",

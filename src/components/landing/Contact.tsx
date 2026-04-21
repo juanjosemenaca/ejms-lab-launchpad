@@ -5,12 +5,18 @@ import { Textarea } from "@/components/ui/textarea";
 import { ArrowRight, Upload } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useLanguage } from "@/contexts/LanguageContext";
+import { submitContactMessage } from "@/api/contactSubmissionsApi";
+import { isSupabaseConfigured } from "@/lib/supabaseClient";
 
 const Contact = () => {
   const { t } = useLanguage();
   const { toast } = useToast();
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [name, setName] = useState("");
+  const [company, setCompany] = useState("");
+  const [email, setEmail] = useState("");
+  const [help, setHelp] = useState("");
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -39,18 +45,62 @@ const Contact = () => {
     }
   };
 
-  const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
+  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
+    const nameT = name.trim();
+    const emailT = email.trim().toLowerCase();
+    const companyT = company.trim();
+    let messageT = help.trim();
+    if (nameT.length < 2) {
+      toast({ title: "Error", description: t("contact_name"), variant: "destructive" });
+      return;
+    }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailT)) {
+      toast({ title: "Error", description: t("contact_email"), variant: "destructive" });
+      return;
+    }
+    if (messageT.length < 10) {
+      toast({ title: "Error", description: t("contact_help"), variant: "destructive" });
+      return;
+    }
+    if (selectedFile) {
+      messageT += `\n\n[PDF indicado por el usuario: ${selectedFile.name} — el archivo no se almacena en el servidor]`;
+    }
+    if (!isSupabaseConfigured()) {
+      toast({
+        title: "Error",
+        description: t("contact_submit_config"),
+        variant: "destructive",
+      });
+      return;
+    }
     setIsSubmitting(true);
-    setTimeout(() => {
+    try {
+      await submitContactMessage({
+        name: nameT,
+        email: emailT,
+        company: companyT,
+        message: messageT,
+        source: "landing",
+      });
       toast({
         title: t("contact_toast_title"),
         description: t("contact_toast_desc"),
       });
-      setIsSubmitting(false);
+      setName("");
+      setCompany("");
+      setEmail("");
+      setHelp("");
       setSelectedFile(null);
-      (e.target as HTMLFormElement).reset();
-    }, 1000);
+    } catch (err) {
+      toast({
+        title: "Error",
+        description: err instanceof Error ? err.message : t("contact_submit_error"),
+        variant: "destructive",
+      });
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -84,6 +134,8 @@ const Contact = () => {
                   </label>
                   <Input
                     required
+                    value={name}
+                    onChange={(ev) => setName(ev.target.value)}
                     placeholder={t("contact_name_placeholder")}
                     className="rounded-xl h-11 bg-white/5 border-white/10 text-white placeholder:text-white/40 focus:border-primary/40"
                   />
@@ -93,6 +145,8 @@ const Contact = () => {
                     {t("contact_company")}
                   </label>
                   <Input
+                    value={company}
+                    onChange={(ev) => setCompany(ev.target.value)}
                     placeholder={t("contact_company_placeholder")}
                     className="rounded-xl h-11 bg-white/5 border-white/10 text-white placeholder:text-white/40 focus:border-primary/40"
                   />
@@ -105,6 +159,8 @@ const Contact = () => {
                 <Input
                   type="email"
                   required
+                  value={email}
+                  onChange={(ev) => setEmail(ev.target.value)}
                   placeholder={t("contact_email_placeholder")}
                   className="rounded-xl h-11 bg-white/5 border-white/10 text-white placeholder:text-white/40 focus:border-primary/40"
                 />
@@ -115,6 +171,8 @@ const Contact = () => {
                 </label>
                 <Textarea
                   required
+                  value={help}
+                  onChange={(ev) => setHelp(ev.target.value)}
                   placeholder={t("contact_help_placeholder")}
                   className="rounded-xl min-h-[130px] bg-white/5 border-white/10 text-white placeholder:text-white/40 focus:border-primary/40 resize-none"
                 />

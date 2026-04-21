@@ -42,6 +42,7 @@ import AdminWorkerAgenda from "./pages/admin/AdminWorkerAgenda";
 import WorkerExpenses from "./pages/admin/WorkerExpenses";
 import AdminWorkerExpenses from "./pages/admin/AdminWorkerExpenses";
 import AdminBilling from "./pages/admin/AdminBilling";
+import AdminContactSubmissions from "./pages/admin/AdminContactSubmissions";
 
 const queryClient = new QueryClient();
 
@@ -120,6 +121,14 @@ const App = () => (
                   element={
                     <RoleRoute allowedRoles={["ADMIN"]}>
                       <AdminWorkerMessages />
+                    </RoleRoute>
+                  }
+                />
+                <Route
+                  path="mensajes-contacto-web"
+                  element={
+                    <RoleRoute allowedRoles={["ADMIN"]}>
+                      <AdminContactSubmissions />
                     </RoleRoute>
                   }
                 />

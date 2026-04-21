@@ -501,6 +501,16 @@ export interface BillingAuditLogRow {
   created_at: string;
 }
 
+export interface ContactSubmissionRow {
+  id: string;
+  created_at: string;
+  name: string;
+  email: string;
+  company: string;
+  message: string;
+  source: string;
+}
+
 /** Perfil backoffice (sin contraseña; Auth en `auth.users`). */
 export type BackofficeUserInsert = Omit<
   BackofficeUserRow,

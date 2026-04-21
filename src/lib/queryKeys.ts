@@ -34,4 +34,5 @@ export const queryKeys = {
   billingInvoices: ["billingInvoices"] as const,
   workerExpenseSheets: (companyWorkerId: string) => ["workerExpenseSheets", companyWorkerId] as const,
   workerExpenseSheetsAdmin: ["workerExpenseSheets", "admin"] as const,
+  contactSubmissions: ["contactSubmissions"] as const,
 };

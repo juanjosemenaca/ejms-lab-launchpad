@@ -77,6 +77,8 @@
   "contact_send": "Enviar missatge",
   "contact_toast_title": "Missatge enviat",
   "contact_toast_desc": "Ens posarem en contacte amb tu el més aviat possible.",
+  "contact_submit_error": "No s'ha pogut enviar el missatge. Torna-ho a provar o escriu-nos per correu.",
+  "contact_submit_config": "El formulari no està disponible en aquest moment.",
   "footer_tagline": "Informàtica, organització i mètodes. Consultora tecnològica especialitzada en el sector financer.",
   "footer_nav": "Navegació",
   "footer_contact": "Contacte",

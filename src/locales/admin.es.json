@@ -83,6 +83,7 @@
     "nav_worker_time_clock_correction": "Solicitar corrección",
     "nav_worker_time_clock_history": "Historial fichajes",
     "nav_worker_messages_admin": "Mensajes trabajadores",
+    "nav_contact_web": "Contacto (web)",
     "nav_time_clock_admin": "Control de fichajes",
     "nav_time_clock_hub": "Fichajes",
     "nav_time_clock_reports": "Informes fichajes",
@@ -143,6 +144,24 @@
     "validation_min": "Mínimo 8 caracteres",
     "validation_match": "Las contraseñas no coinciden",
     "save_error": "No se pudo guardar la contraseña."
+  },
+  "contactSubmissions": {
+    "title": "Mensajes desde la web",
+    "subtitle": "Formularios de contacto enviados desde la página pública.",
+    "col_date": "Fecha",
+    "col_name": "Nombre",
+    "col_email": "Email",
+    "col_company": "Empresa",
+    "col_message": "Mensaje",
+    "col_source": "Origen",
+    "empty": "Aún no hay mensajes.",
+    "load_error": "No se pudieron cargar los mensajes",
+    "delete": "Eliminar",
+    "view": "Ver",
+    "dialog_title": "Mensaje de contacto",
+    "toast_deleted": "Mensaje eliminado.",
+    "delete_confirm_title": "¿Eliminar este mensaje?",
+    "delete_confirm_desc": "Se borrará de forma permanente. Esta acción no se puede deshacer."
   },
   "auth": {
     "supabase_not_configured": "Supabase no está configurado.",

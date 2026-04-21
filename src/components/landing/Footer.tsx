@@ -64,8 +64,8 @@ const Footer = () => {
             </h4>
             <div className="space-y-3 text-sm text-white/40">
               <p>
-                <a href="mailto:admon@inorme.com" className="hover:text-primary transition-colors">
-                  admon@inorme.com
+                <a href="mailto:info@ejmslab.net" className="hover:text-primary transition-colors">
+                  info@ejmslab.net
                 </a>
               </p>
               <p>

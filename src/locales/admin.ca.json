@@ -83,6 +83,7 @@
     "nav_worker_time_clock_correction": "Sol·licitar correcció",
     "nav_worker_time_clock_history": "Historial de fitxatges",
     "nav_worker_messages_admin": "Missatges treballadors",
+    "nav_contact_web": "Contacte (web)",
     "nav_time_clock_admin": "Control de fitxatges",
     "nav_time_clock_hub": "Fitxatges",
     "nav_time_clock_reports": "Informes fitxatges",
@@ -143,6 +144,24 @@
     "validation_min": "Mínim 8 caràcters",
     "validation_match": "Les contrasenyes no coincideixen",
     "save_error": "No s'ha pogut desar la contrasenya."
+  },
+  "contactSubmissions": {
+    "title": "Missatges des de la web",
+    "subtitle": "Formularis de contacte enviats des de la pàgina pública.",
+    "col_date": "Data",
+    "col_name": "Nom",
+    "col_email": "Correu",
+    "col_company": "Empresa",
+    "col_message": "Missatge",
+    "col_source": "Origen",
+    "empty": "Encara no hi ha missatges.",
+    "load_error": "No s'han pogut carregar els missatges",
+    "delete": "Eliminar",
+    "view": "Veure",
+    "dialog_title": "Missatge de contacte",
+    "toast_deleted": "Missatge eliminat.",
+    "delete_confirm_title": "Vols eliminar aquest missatge?",
+    "delete_confirm_desc": "S'esborrarà de forma permanent. Aquesta acció no es pot desfer."
   },
   "auth": {
     "supabase_not_configured": "Supabase no està configurat.",
