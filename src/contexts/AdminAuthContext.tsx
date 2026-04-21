@@ -44,6 +44,27 @@ function normalizeUserRole(value: unknown): UserRole | null {
   return null;
 }
 
+/** PostgREST / Supabase errors are not always `instanceof Error`. */
+function errorToMessage(e: unknown): string {
+  if (e instanceof Error) return e.message;
+  if (e && typeof e === "object") {
+    const o = e as Record<string, unknown>;
+    if (typeof o.message === "string" && o.message.trim()) return o.message;
+    if (typeof o.error_description === "string" && o.error_description.trim()) return o.error_description;
+    if (typeof o.details === "string" && o.details.trim()) return o.details;
+    if (typeof o.hint === "string" && o.hint.trim()) return o.hint;
+  }
+  return String(e);
+}
+
+async function fetchCompanyWorkersSafe(): Promise<Awaited<ReturnType<typeof fetchCompanyWorkers>>> {
+  try {
+    return await fetchCompanyWorkers();
+  } catch {
+    return [];
+  }
+}
+
 export function AdminAuthProvider({ children }: { children: ReactNode }) {
   const { t } = useLanguage();
   const [user, setUser] = useState<BackofficeSession | null>(null);
@@ -80,7 +101,7 @@ export function AdminAuthProvider({ children }: { children: ReactNode }) {
       setNeedsPasswordChange(false);
       return;
     }
-    const workers = await fetchCompanyWorkers();
+    const workers = await fetchCompanyWorkersSafe();
     setNeedsPasswordChange(
       profileRequiresPasswordChange(profile.mustChangePassword, profile.passwordChangedAt)
     );
@@ -150,7 +171,7 @@ export function AdminAuthProvider({ children }: { children: ReactNode }) {
       if (!supabase) {
         return { ok: false, message: t("admin.auth.supabase_not_configured") };
       }
-      const { error: signInError } = await supabase.auth.signInWithPassword({
+      const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
         email: email.trim(),
         password,
       });
@@ -160,9 +181,7 @@ export function AdminAuthProvider({ children }: { children: ReactNode }) {
           message: mapSignInError(signInError as { message: string; code?: string; status?: number }),
         };
       }
-      const {
-        data: { user: authUser },
-      } = await supabase.auth.getUser();
+      const authUser = signInData.session?.user;
       if (!authUser) {
         await supabase.auth.signOut();
         return { ok: false, message: t("admin.auth.no_user_after_login") };
@@ -173,12 +192,12 @@ export function AdminAuthProvider({ children }: { children: ReactNode }) {
         profile = await resolveProfileForSession(authUser.id, authUser.email ?? email);
       } catch (e) {
         await supabase.auth.signOut();
+        const detail = errorToMessage(e);
         return {
           ok: false,
-          message:
-            e instanceof Error
-              ? `${t("admin.auth.profile_load_error_prefix")} ${e.message}`
-              : t("admin.auth.profile_load_error"),
+          message: detail
+            ? `${t("admin.auth.profile_load_error_prefix")} ${detail}`
+            : t("admin.auth.profile_load_error"),
         };
       }
 
@@ -194,7 +213,7 @@ export function AdminAuthProvider({ children }: { children: ReactNode }) {
         return { ok: false, message: t("admin.auth.account_disabled") };
       }
 
-      const workers = await fetchCompanyWorkers();
+      const workers = await fetchCompanyWorkersSafe();
       const needsPwd = profileRequiresPasswordChange(
         profile.mustChangePassword,
         profile.passwordChangedAt
