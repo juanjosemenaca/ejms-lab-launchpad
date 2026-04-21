@@ -25,7 +25,7 @@ import {
   NotebookPen,
   Database,
   Euro,
-  Mail,
+  Globe,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -97,9 +97,9 @@ const NAV_KEYS = [
     roles: ["ADMIN"] as const,
   },
   {
-    to: "/admin/mensajes-contacto-web",
-    labelKey: "admin.layout.nav_contact_web",
-    icon: Mail,
+    to: ADMIN_PATHS.mensajesFormularioWeb,
+    labelKey: "admin.layout.nav_web_form_messages",
+    icon: Globe,
     roles: ["ADMIN"] as const,
   },
   {
@@ -162,6 +162,7 @@ const ADMIN_MESSAGE_CHILD_ROUTES = [
   ADMIN_PATHS.solicitudesVacaciones,
   ADMIN_PATHS.solicitudesFicha,
   ADMIN_PATHS.mensajesTrabajadores,
+  ADMIN_PATHS.mensajesFormularioWeb,
   ADMIN_PATHS.solicitudesFichajes,
 ] as const;
 

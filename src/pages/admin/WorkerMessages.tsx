@@ -99,127 +99,140 @@ const WorkerMessages = () => {
     },
   });
 
+  const header = (
+    <div>
+      <h1 className="text-2xl font-bold tracking-tight flex items-center gap-2">
+        <Bell className="h-6 w-6 text-primary" aria-hidden />
+        {t("admin.messages.title")}
+      </h1>
+      <p className="text-muted-foreground text-sm mt-1">{t("admin.messages.subtitle")}</p>
+    </div>
+  );
+
+  const inboxCard = (
+    <Card>
+      <CardHeader className="pb-2">
+        <CardTitle className="text-base">{t("admin.messages.inbox_title")}</CardTitle>
+        <CardDescription>
+          {t("admin.common.showing")} {threads.length}
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        {threads.length === 0 ? (
+          <p className="text-sm text-muted-foreground py-6 text-center">{t("admin.messages.empty")}</p>
+        ) : (
+          <div className="grid gap-4 lg:grid-cols-[280px,1fr]">
+            <div className="space-y-2 max-h-[70vh] overflow-y-auto pr-1">
+              {threads.map((th) => (
+                <button
+                  key={th.threadId}
+                  type="button"
+                  onClick={() => {
+                    setActiveThreadId(th.threadId);
+                    if (th.unreadCount > 0 && !markReadMutation.isPending) {
+                      markReadMutation.mutate(th.threadId);
+                    }
+                  }}
+                  className={`w-full text-left rounded-lg border px-3 py-2.5 space-y-1 ${
+                    activeThreadId === th.threadId ? "border-primary bg-primary/5" : "hover:bg-muted/40"
+                  }`}
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-sm font-medium truncate">{th.title}</p>
+                    {th.unreadCount > 0 ? <Badge>{th.unreadCount}</Badge> : null}
+                  </div>
+                  <p className="text-xs text-muted-foreground truncate">{th.counterpartName}</p>
+                  <p className="text-[11px] text-muted-foreground">{formatDt(th.lastAt)}</p>
+                </button>
+              ))}
+            </div>
+
+            {activeThread ? (
+              <div className="rounded-lg border p-3 md:p-4 space-y-3">
+                <div className="border-b pb-2">
+                  <p className="font-medium">{activeThread.title}</p>
+                  <p className="text-xs text-muted-foreground">{activeThread.counterpartName}</p>
+                </div>
+                <div className="space-y-2 max-h-[48vh] overflow-y-auto pr-1">
+                  {activeThread.messages.map((m) => {
+                    const mine = m.senderBackofficeUserId === myUserId;
+                    return (
+                      <div
+                        key={m.id}
+                        className={`rounded-lg px-3 py-2 text-sm border ${
+                          mine ? "ml-8 bg-primary/10 border-primary/30" : "mr-8 bg-muted/30"
+                        }`}
+                      >
+                        <p className="whitespace-pre-wrap">{m.body}</p>
+                        <p className="text-[11px] text-muted-foreground mt-1">
+                          {formatDt(m.createdAt)}
+                          {!mine && m.readAt ? ` · ${t("admin.messages.read_at")} ${formatDt(m.readAt)}` : ""}
+                        </p>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                <div className="pt-2 border-t space-y-2">
+                  {activeThread.counterpartId ? (
+                    <>
+                      <Textarea
+                        rows={3}
+                        value={replyBody}
+                        onChange={(e) => setReplyBody(e.target.value)}
+                        placeholder={t("admin.messages.reply_placeholder")}
+                      />
+                      <div className="flex justify-end">
+                        <Button
+                          type="button"
+                          size="sm"
+                          className="gap-1.5"
+                          disabled={!replyBody.trim() || replyMutation.isPending}
+                          onClick={() => replyMutation.mutate()}
+                        >
+                          <Send className="h-4 w-4" />
+                          {t("admin.messages.reply_send")}
+                        </Button>
+                      </div>
+                    </>
+                  ) : (
+                    <p className="text-xs text-muted-foreground">{t("admin.messages.system_thread_no_reply")}</p>
+                  )}
+                </div>
+              </div>
+            ) : null}
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+
   if (isLoading) {
     return (
-      <div className="flex items-center justify-center gap-2 py-16 text-muted-foreground">
-        <Loader2 className="h-6 w-6 animate-spin" />
-        {t("admin.common.loading")}
+      <div className="space-y-6 max-w-4xl">
+        {header}
+        <div className="flex items-center justify-center gap-2 py-16 text-muted-foreground">
+          <Loader2 className="h-6 w-6 animate-spin" />
+          {t("admin.common.loading")}
+        </div>
       </div>
     );
   }
   if (isError) {
     return (
-      <p className="text-destructive text-sm py-8">
-        {error instanceof Error ? error.message : t("admin.messages.load_error")}
-      </p>
+      <div className="space-y-6 max-w-4xl">
+        {header}
+        <p className="text-destructive text-sm py-8">
+          {error instanceof Error ? error.message : t("admin.messages.load_error")}
+        </p>
+      </div>
     );
   }
 
   return (
     <div className="space-y-6 max-w-4xl">
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight flex items-center gap-2">
-          <Bell className="h-6 w-6 text-primary" aria-hidden />
-          {t("admin.messages.title")}
-        </h1>
-        <p className="text-muted-foreground text-sm mt-1">{t("admin.messages.subtitle")}</p>
-      </div>
-
-      <Card>
-        <CardHeader className="pb-2">
-          <CardTitle className="text-base">{t("admin.messages.inbox_title")}</CardTitle>
-          <CardDescription>
-            {t("admin.common.showing")} {threads.length}
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          {threads.length === 0 ? (
-            <p className="text-sm text-muted-foreground py-6 text-center">{t("admin.messages.empty")}</p>
-          ) : (
-            <div className="grid gap-4 lg:grid-cols-[280px,1fr]">
-              <div className="space-y-2 max-h-[70vh] overflow-y-auto pr-1">
-                {threads.map((th) => (
-                  <button
-                    key={th.threadId}
-                    type="button"
-                    onClick={() => {
-                      setActiveThreadId(th.threadId);
-                      if (th.unreadCount > 0 && !markReadMutation.isPending) {
-                        markReadMutation.mutate(th.threadId);
-                      }
-                    }}
-                    className={`w-full text-left rounded-lg border px-3 py-2.5 space-y-1 ${
-                      activeThreadId === th.threadId ? "border-primary bg-primary/5" : "hover:bg-muted/40"
-                    }`}
-                  >
-                    <div className="flex items-center justify-between gap-2">
-                      <p className="text-sm font-medium truncate">{th.title}</p>
-                      {th.unreadCount > 0 ? <Badge>{th.unreadCount}</Badge> : null}
-                    </div>
-                    <p className="text-xs text-muted-foreground truncate">{th.counterpartName}</p>
-                    <p className="text-[11px] text-muted-foreground">{formatDt(th.lastAt)}</p>
-                  </button>
-                ))}
-              </div>
-
-              {activeThread ? (
-                <div className="rounded-lg border p-3 md:p-4 space-y-3">
-                  <div className="border-b pb-2">
-                    <p className="font-medium">{activeThread.title}</p>
-                    <p className="text-xs text-muted-foreground">{activeThread.counterpartName}</p>
-                  </div>
-                  <div className="space-y-2 max-h-[48vh] overflow-y-auto pr-1">
-                    {activeThread.messages.map((m) => {
-                      const mine = m.senderBackofficeUserId === myUserId;
-                      return (
-                        <div
-                          key={m.id}
-                          className={`rounded-lg px-3 py-2 text-sm border ${
-                            mine ? "ml-8 bg-primary/10 border-primary/30" : "mr-8 bg-muted/30"
-                          }`}
-                        >
-                          <p className="whitespace-pre-wrap">{m.body}</p>
-                          <p className="text-[11px] text-muted-foreground mt-1">
-                            {formatDt(m.createdAt)}
-                            {!mine && m.readAt ? ` · ${t("admin.messages.read_at")} ${formatDt(m.readAt)}` : ""}
-                          </p>
-                        </div>
-                      );
-                    })}
-                  </div>
-
-                  <div className="pt-2 border-t space-y-2">
-                    {activeThread.counterpartId ? (
-                      <>
-                        <Textarea
-                          rows={3}
-                          value={replyBody}
-                          onChange={(e) => setReplyBody(e.target.value)}
-                          placeholder={t("admin.messages.reply_placeholder")}
-                        />
-                        <div className="flex justify-end">
-                          <Button
-                            type="button"
-                            size="sm"
-                            className="gap-1.5"
-                            disabled={!replyBody.trim() || replyMutation.isPending}
-                            onClick={() => replyMutation.mutate()}
-                          >
-                            <Send className="h-4 w-4" />
-                            {t("admin.messages.reply_send")}
-                          </Button>
-                        </div>
-                      </>
-                    ) : (
-                      <p className="text-xs text-muted-foreground">{t("admin.messages.system_thread_no_reply")}</p>
-                    )}
-                  </div>
-                </div>
-              ) : null}
-            </div>
-          )}
-        </CardContent>
-      </Card>
+      {header}
+      {inboxCard}
     </div>
   );
 };

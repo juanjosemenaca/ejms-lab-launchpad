@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Archive, ArchiveRestore, Check, ChevronsUpDown, Loader2, MailPlus, Search, Send, Trash2 } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -29,6 +30,7 @@ import {
 import { queryKeys } from "@/lib/queryKeys";
 import type { BackofficeMessageRecord } from "@/types/backofficeMessages";
 import { cn } from "@/lib/utils";
+import { ContactSubmissionsPanel } from "@/components/admin/ContactSubmissionsPanel";
 
 const AdminWorkerMessages = () => {
   const { t, language } = useLanguage();
@@ -210,29 +212,18 @@ const AdminWorkerMessages = () => {
     },
   });
 
-  if (isLoading) {
-    return (
+  const workersTabInner =
+    isLoading ? (
       <div className="flex items-center justify-center gap-2 py-16 text-muted-foreground">
         <Loader2 className="h-6 w-6 animate-spin" />
         {t("admin.common.loading")}
       </div>
-    );
-  }
-  if (isError) {
-    return (
+    ) : isError ? (
       <p className="text-destructive text-sm py-8">
         {error instanceof Error ? error.message : t("admin.messages.load_error")}
       </p>
-    );
-  }
-
-  return (
-    <div className="space-y-6 max-w-6xl">
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight">{t("admin.messages.admin_title")}</h1>
-        <p className="text-muted-foreground text-sm mt-1">{t("admin.messages.admin_subtitle")}</p>
-      </div>
-
+    ) : (
+      <>
       <Card>
         <CardHeader className="pb-2">
           <CardTitle className="text-base flex items-center gap-2">
@@ -467,6 +458,28 @@ const AdminWorkerMessages = () => {
           )}
         </CardContent>
       </Card>
+      </>
+    );
+
+  return (
+    <div className="space-y-6 max-w-6xl">
+      <div>
+        <h1 className="text-2xl font-bold tracking-tight">{t("admin.messages.admin_title")}</h1>
+        <p className="text-muted-foreground text-sm mt-1">{t("admin.messages.admin_subtitle")}</p>
+      </div>
+
+      <Tabs defaultValue="workers" className="w-full">
+        <TabsList className="flex flex-wrap h-auto gap-1 p-1">
+          <TabsTrigger value="workers">{t("admin.messages.tab_workers")}</TabsTrigger>
+          <TabsTrigger value="web">{t("admin.messages.tab_web_form")}</TabsTrigger>
+        </TabsList>
+        <TabsContent value="workers" className="mt-6 space-y-6">
+          {workersTabInner}
+        </TabsContent>
+        <TabsContent value="web" className="mt-6">
+          <ContactSubmissionsPanel />
+        </TabsContent>
+      </Tabs>
     </div>
   );
 };

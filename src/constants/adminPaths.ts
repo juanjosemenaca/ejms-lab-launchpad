@@ -6,6 +6,7 @@ export const ADMIN_ROUTE_SEG = {
   solicitudesFichajes: "solicitudes-fichajes",
   solicitudesVacaciones: "solicitudes-vacaciones",
   mensajesTrabajadores: "mensajes-trabajadores",
+  mensajesFormularioWeb: "mensajes-formulario-web",
   gastosTrabajadores: "gastos-trabajadores",
 } as const;
 
@@ -18,5 +19,6 @@ export const ADMIN_PATHS = {
   solicitudesFichajes: adminAbs(ADMIN_ROUTE_SEG.solicitudesFichajes),
   solicitudesVacaciones: adminAbs(ADMIN_ROUTE_SEG.solicitudesVacaciones),
   mensajesTrabajadores: adminAbs(ADMIN_ROUTE_SEG.mensajesTrabajadores),
+  mensajesFormularioWeb: adminAbs(ADMIN_ROUTE_SEG.mensajesFormularioWeb),
   gastosTrabajadores: adminAbs(ADMIN_ROUTE_SEG.gastosTrabajadores),
 } as const;

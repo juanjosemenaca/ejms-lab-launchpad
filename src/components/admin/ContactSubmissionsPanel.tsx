@@ -36,7 +36,8 @@ import { useToast } from "@/hooks/use-toast";
 import { isSupabaseConfigured } from "@/lib/supabaseClient";
 import type { ContactSubmissionRecord } from "@/types/contactSubmissions";
 
-const AdminContactSubmissions = () => {
+/** Listado de mensajes del formulario de contacto de la web (solo ADMIN por RLS). */
+export function ContactSubmissionsPanel() {
   const { t, language } = useLanguage();
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -69,19 +70,14 @@ const AdminContactSubmissions = () => {
 
   if (!supabaseOk) {
     return (
-      <div className="p-6 text-sm text-muted-foreground">
+      <p className="text-sm text-muted-foreground py-4">
         {t("admin.login.env_missing")} <code className="text-xs">.env</code>
-      </div>
+      </p>
     );
   }
 
   return (
-    <div className="space-y-6 p-4 md:p-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">{t("admin.contactSubmissions.title")}</h1>
-        <p className="text-muted-foreground text-sm mt-1">{t("admin.contactSubmissions.subtitle")}</p>
-      </div>
-
+    <>
       <Card>
         <CardHeader>
           <CardTitle>{t("admin.contactSubmissions.title")}</CardTitle>
@@ -163,9 +159,7 @@ const AdminContactSubmissions = () => {
         <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>{t("admin.contactSubmissions.dialog_title")}</DialogTitle>
-            <DialogDescription>
-              {viewRow ? formatDt(viewRow.createdAt) : ""}
-            </DialogDescription>
+            <DialogDescription>{viewRow ? formatDt(viewRow.createdAt) : ""}</DialogDescription>
           </DialogHeader>
           {viewRow && (
             <div className="space-y-3 text-sm">
@@ -216,8 +210,6 @@ const AdminContactSubmissions = () => {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </div>
+    </>
   );
-};
-
-export default AdminContactSubmissions;
+}

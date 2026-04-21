@@ -28,6 +28,7 @@ import WorkerMyProfile from "./pages/admin/WorkerMyProfile";
 import WorkerMyCalendar from "./pages/admin/WorkerMyCalendar";
 import WorkerMessages from "./pages/admin/WorkerMessages";
 import AdminWorkerMessages from "./pages/admin/AdminWorkerMessages";
+import AdminWebFormMessages from "./pages/admin/AdminWebFormMessages";
 import AdminWorkerProfileRequests from "./pages/admin/AdminWorkerProfileRequests";
 import WorkerTimeClockLayout from "./pages/admin/WorkerTimeClockLayout";
 import WorkerTimeClockFichar from "./pages/admin/WorkerTimeClockFichar";
@@ -42,7 +43,6 @@ import AdminWorkerAgenda from "./pages/admin/AdminWorkerAgenda";
 import WorkerExpenses from "./pages/admin/WorkerExpenses";
 import AdminWorkerExpenses from "./pages/admin/AdminWorkerExpenses";
 import AdminBilling from "./pages/admin/AdminBilling";
-import AdminContactSubmissions from "./pages/admin/AdminContactSubmissions";
 
 const queryClient = new QueryClient();
 
@@ -125,10 +125,10 @@ const App = () => (
                   }
                 />
                 <Route
-                  path="mensajes-contacto-web"
+                  path={ADMIN_ROUTE_SEG.mensajesFormularioWeb}
                   element={
                     <RoleRoute allowedRoles={["ADMIN"]}>
-                      <AdminContactSubmissions />
+                      <AdminWebFormMessages />
                     </RoleRoute>
                   }
                 />
