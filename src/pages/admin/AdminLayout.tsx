@@ -12,6 +12,7 @@ import {
   Truck,
   Contact2,
   Menu,
+  X,
   IdCard,
   Inbox,
   MessageSquare,
@@ -359,7 +360,10 @@ const AdminLayout = () => {
     mobile?: boolean;
     vacationNotifyCount?: number;
     expensePendingCount?: number;
-  }) => (
+  }) => {
+    /** Menú móvil admin: fondo claro; enlaces legibles (el lateral escritorio sigue oscuro). */
+    const flyoutLight = Boolean(mobile && isAdmin);
+    return (
     <>
       {navItemsWithoutAdminMessages.map((item) => {
         const active = isNavActive(item.to);
@@ -395,11 +399,17 @@ const AdminLayout = () => {
                 isAdmin
                   ? active
                     ? attention
-                      ? "bg-red-950/50 text-red-400 border-l-2 border-red-500 -ml-px pl-[11px]"
+                      ? flyoutLight
+                        ? "bg-red-100 text-red-800 border-l-2 border-red-500 -ml-px pl-[11px]"
+                        : "bg-red-950/50 text-red-400 border-l-2 border-red-500 -ml-px pl-[11px]"
                       : "bg-primary/20 text-primary border-l-2 border-primary -ml-px pl-[11px] font-bold"
                     : attention
-                      ? "text-red-400 border-l-2 border-transparent hover:bg-slate-800 hover:text-red-300"
-                      : "text-slate-300 hover:bg-slate-800 hover:text-white border-l-2 border-transparent"
+                      ? flyoutLight
+                        ? "text-red-600 border-l-2 border-transparent hover:bg-red-50 hover:text-red-800"
+                        : "text-red-400 border-l-2 border-transparent hover:bg-slate-800 hover:text-red-300"
+                      : flyoutLight
+                        ? "text-muted-foreground hover:bg-muted hover:text-foreground border-l-2 border-transparent"
+                        : "text-slate-300 hover:bg-slate-800 hover:text-white border-l-2 border-transparent"
                   : active
                     ? attention
                       ? "bg-red-100 dark:bg-red-950/40 text-red-700 dark:text-red-400 font-bold"
@@ -413,7 +423,7 @@ const AdminLayout = () => {
                 <item.icon
                   className={cn(
                     "h-4 w-4 shrink-0 opacity-90",
-                    attention && isAdmin && "text-red-400 opacity-100",
+                    attention && isAdmin && (flyoutLight ? "text-red-600 opacity-100" : "text-red-400 opacity-100"),
                     attention && !isAdmin && "text-red-600 dark:text-red-400 opacity-100"
                   )}
                 />
@@ -448,7 +458,9 @@ const AdminLayout = () => {
                     "flex w-full items-center justify-between gap-2 rounded-lg border-l-2 px-3 py-2.5 text-sm transition-colors",
                     isAdminDataSectionActive
                       ? "-ml-px border-primary bg-primary/20 pl-[11px] font-bold text-primary"
-                      : "border-transparent font-medium text-slate-300 hover:bg-slate-800 hover:text-white"
+                      : flyoutLight
+                        ? "border-transparent font-medium text-muted-foreground hover:bg-muted hover:text-foreground"
+                        : "border-transparent font-medium text-slate-300 hover:bg-slate-800 hover:text-white"
                   )}
                 >
                   <span className="flex min-w-0 items-center gap-3">
@@ -481,8 +493,12 @@ const AdminLayout = () => {
                             subActive
                               ? "bg-primary/20 font-bold text-primary"
                               : subAttention
-                                ? "font-semibold text-red-400 hover:bg-slate-800"
-                                : "text-slate-300 hover:bg-slate-800 hover:text-white"
+                                ? flyoutLight
+                                  ? "font-semibold text-red-600 hover:bg-red-50"
+                                  : "font-semibold text-red-400 hover:bg-slate-800"
+                                : flyoutLight
+                                  ? "text-muted-foreground hover:bg-muted hover:text-foreground"
+                                  : "text-slate-300 hover:bg-slate-800 hover:text-white"
                           )}
                         >
                           <span className="flex min-w-0 items-center gap-2">
@@ -504,7 +520,9 @@ const AdminLayout = () => {
                             "flex w-full items-center justify-between gap-2 rounded-lg px-3 py-2 text-sm transition-colors",
                             isAdminDataFichajeSectionActive
                               ? "bg-primary/20 font-bold text-primary"
-                              : "font-medium text-slate-300 hover:bg-slate-800 hover:text-white"
+                              : flyoutLight
+                                ? "font-medium text-muted-foreground hover:bg-muted hover:text-foreground"
+                                : "font-medium text-slate-300 hover:bg-slate-800 hover:text-white"
                           )}
                         >
                           <span className="flex min-w-0 items-center gap-2">
@@ -524,7 +542,10 @@ const AdminLayout = () => {
                             id="admin-data-fichaje-submenu"
                             role="region"
                             aria-labelledby="admin-data-fichaje-button"
-                            className="ml-1 space-y-0.5 border-l-2 border-slate-600/60 pl-3"
+                            className={cn(
+                              "ml-1 space-y-0.5 border-l-2 pl-3",
+                              flyoutLight ? "border-slate-200" : "border-slate-600/60"
+                            )}
                           >
                             {WORKER_TIME_CLOCK_NAV_SUBITEMS.map((sub) => {
                               const SubIcon = sub.icon;
@@ -538,7 +559,9 @@ const AdminLayout = () => {
                                     "flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-sm transition-colors",
                                     subActive
                                       ? "bg-primary/15 font-semibold text-primary"
-                                      : "text-slate-300 hover:bg-slate-800 hover:text-white"
+                                      : flyoutLight
+                                        ? "text-muted-foreground hover:bg-muted hover:text-foreground"
+                                        : "text-slate-300 hover:bg-slate-800 hover:text-white"
                                   )}
                                 >
                                   <SubIcon className="h-3.5 w-3.5 shrink-0 opacity-80" aria-hidden />
@@ -564,7 +587,9 @@ const AdminLayout = () => {
                     "flex items-center justify-between gap-2 rounded-lg px-3 py-2.5 text-sm transition-colors w-full border-l-2",
                     isUsersSectionActive
                       ? "font-bold text-primary bg-primary/20 border-primary -ml-px pl-[11px]"
-                      : "font-medium text-slate-300 hover:bg-slate-800 hover:text-white border-transparent"
+                      : flyoutLight
+                        ? "font-medium text-muted-foreground hover:bg-muted hover:text-foreground border-transparent"
+                        : "font-medium text-slate-300 hover:bg-slate-800 hover:text-white border-transparent"
                   )}
                 >
                   <span className="flex items-center gap-3 min-w-0">
@@ -588,7 +613,9 @@ const AdminLayout = () => {
                             "flex items-center justify-between gap-2 rounded-lg px-3 py-2 text-sm transition-colors w-full",
                             subActive
                               ? "bg-primary/20 text-primary font-bold"
-                              : "text-slate-300 hover:bg-slate-800 hover:text-white"
+                              : flyoutLight
+                                ? "text-muted-foreground hover:bg-muted hover:text-foreground"
+                                : "text-slate-300 hover:bg-slate-800 hover:text-white"
                           )}
                         >
                           <span className="truncate">{t(sub.labelKey)}</span>
@@ -670,7 +697,9 @@ const AdminLayout = () => {
               "flex items-center justify-between gap-2 rounded-lg px-3 py-2.5 text-sm transition-colors w-full border-l-2",
               isTimeClockSectionActive
                 ? "font-bold text-primary bg-primary/20 border-primary -ml-px pl-[11px]"
-                : "font-medium text-slate-300 hover:bg-slate-800 hover:text-white border-transparent"
+                : flyoutLight
+                  ? "font-medium text-muted-foreground hover:bg-muted hover:text-foreground border-transparent"
+                  : "font-medium text-slate-300 hover:bg-slate-800 hover:text-white border-transparent"
             )}
           >
             <span className="flex items-center gap-3 min-w-0">
@@ -694,7 +723,9 @@ const AdminLayout = () => {
                       "flex items-center justify-between gap-2 rounded-lg px-3 py-2 text-sm transition-colors w-full",
                       subActive
                         ? "bg-primary/20 text-primary font-bold"
-                        : "text-slate-300 hover:bg-slate-800 hover:text-white"
+                        : flyoutLight
+                          ? "text-muted-foreground hover:bg-muted hover:text-foreground"
+                          : "text-slate-300 hover:bg-slate-800 hover:text-white"
                     )}
                   >
                     <span className="truncate">{t(sub.labelKey)}</span>
@@ -722,15 +753,20 @@ const AdminLayout = () => {
               "flex items-center justify-between gap-2 rounded-lg px-3 py-2.5 text-sm transition-colors w-full",
               isAdminMessagesSectionActive && "font-bold bg-primary/20 text-primary border-l-2 border-primary -ml-px pl-[11px]",
               pendingAdminMessagesCount > 0
-                ? "font-bold text-red-400 border-l-2 border-transparent hover:bg-slate-800 hover:text-red-300"
-                : "font-medium text-slate-300 hover:bg-slate-800 hover:text-white border-l-2 border-transparent"
+                ? flyoutLight
+                  ? "font-bold text-red-600 border-l-2 border-transparent hover:bg-red-50 hover:text-red-800"
+                  : "font-bold text-red-400 border-l-2 border-transparent hover:bg-slate-800 hover:text-red-300"
+                : flyoutLight
+                  ? "font-medium text-muted-foreground hover:bg-muted hover:text-foreground border-l-2 border-transparent"
+                  : "font-medium text-slate-300 hover:bg-slate-800 hover:text-white border-l-2 border-transparent"
             )}
           >
             <span className="flex items-center gap-3 min-w-0">
               <Inbox
                 className={cn(
                   "h-4 w-4 shrink-0 opacity-90",
-                  pendingAdminMessagesCount > 0 && "text-red-400 opacity-100"
+                  pendingAdminMessagesCount > 0 &&
+                    (flyoutLight ? "text-red-600 opacity-100" : "text-red-400 opacity-100")
                 )}
               />
               <span className="truncate">{t("admin.layout.nav_messages_hub")}</span>
@@ -783,11 +819,17 @@ const AdminLayout = () => {
                       "flex items-center justify-between gap-2 rounded-lg px-3 py-2 text-sm transition-colors w-full",
                       active
                         ? attention
-                          ? "bg-red-950/50 text-red-400 font-bold"
+                          ? flyoutLight
+                            ? "bg-red-100 text-red-800 font-bold"
+                            : "bg-red-950/50 text-red-400 font-bold"
                           : "bg-primary/20 text-primary font-bold"
                         : attention
-                          ? "text-red-400 hover:bg-slate-800 hover:text-red-300"
-                          : "text-slate-300 hover:bg-slate-800 hover:text-white"
+                          ? flyoutLight
+                            ? "text-red-600 hover:bg-red-50 hover:text-red-800"
+                            : "text-red-400 hover:bg-slate-800 hover:text-red-300"
+                          : flyoutLight
+                            ? "text-muted-foreground hover:bg-muted hover:text-foreground"
+                            : "text-slate-300 hover:bg-slate-800 hover:text-white"
                     )}
                   >
                     <span className="truncate">{t(item.labelKey)}</span>
@@ -807,7 +849,8 @@ const AdminLayout = () => {
         </div>
       ) : null}
     </>
-  );
+    );
+  };
 
   /* ——— Vista ADMIN: shell oscuro + área clara ——— */
   if (isAdmin && user) {
@@ -841,17 +884,36 @@ const AdminLayout = () => {
         {/* Contenido principal */}
         <div className="flex-1 flex flex-col min-h-screen bg-slate-50 dark:bg-slate-950/50">
           <header className="sticky top-0 z-20 flex h-14 items-center justify-between gap-3 border-b border-slate-200/80 bg-white/95 px-4 shadow-sm backdrop-blur supports-[backdrop-filter]:bg-white/80 dark:border-slate-800 dark:bg-slate-900/95">
-            <div className="flex items-center gap-2 min-w-0">
-              <Button
-                variant="ghost"
-                size="icon"
-                className="md:hidden shrink-0 -ml-1"
-                onClick={() => setMobileNavOpen((o) => !o)}
-                aria-label={t("admin.layout.menu")}
-              >
-                <Menu className="h-5 w-5" />
-              </Button>
-              <span className="text-sm font-medium text-muted-foreground truncate md:hidden">
+            <div className="flex min-w-0 flex-1 items-center gap-2">
+              <div className="relative shrink-0">
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="md:hidden -ml-1"
+                  onClick={() => setMobileNavOpen((o) => !o)}
+                  aria-label={mobileNavOpen ? t("admin.layout.close_menu") : t("admin.layout.menu")}
+                >
+                  {mobileNavOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
+                </Button>
+                {mobileNavOpen ? (
+                  <div className="md:hidden absolute left-2 top-full z-50 mt-1.5 w-[min(18rem,calc(100vw-2rem))] rounded-lg border border-slate-200 bg-white py-2 text-foreground shadow-xl animate-in slide-in-from-top-2 fade-in duration-200">
+                    <div className="border-b border-slate-200 px-3 pb-2">
+                      <p className="text-[9px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
+                        {t("admin.layout.brand")}
+                      </p>
+                      <p className="text-xs font-bold text-foreground leading-tight">{t("admin.layout.admin_title")}</p>
+                    </div>
+                    <nav className="max-h-[min(65vh,calc(100vh-9rem))] space-y-0.5 overflow-y-auto p-2 text-sm">
+                      <NavLinks
+                        mobile
+                        vacationNotifyCount={pendingVacationRequestCount}
+                        expensePendingCount={pendingExpenseSheetCount}
+                      />
+                    </nav>
+                  </div>
+                ) : null}
+              </div>
+              <span className="truncate text-sm font-medium text-muted-foreground md:hidden">
                 {t("admin.layout.mobile_title")}
               </span>
             </div>
@@ -877,30 +939,6 @@ const AdminLayout = () => {
             </div>
           </header>
 
-          {mobileNavOpen && (
-            <>
-              <button
-                type="button"
-                className="md:hidden fixed inset-0 z-30 bg-slate-950/60 backdrop-blur-sm"
-                aria-label={t("admin.layout.close_menu")}
-                onClick={() => setMobileNavOpen(false)}
-              />
-              <div className="md:hidden fixed inset-y-0 left-0 z-40 w-72 max-w-[85vw] bg-slate-950 border-r border-slate-800 shadow-xl flex flex-col">
-                <div className="p-5 border-b border-slate-800">
-                  <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-slate-500">{t("admin.layout.brand")}</p>
-                  <p className="text-lg font-bold text-white">{t("admin.layout.admin_title")}</p>
-                </div>
-                <nav className="flex-1 p-3 space-y-1 overflow-y-auto">
-                  <NavLinks
-                  mobile
-                  vacationNotifyCount={pendingVacationRequestCount}
-                  expensePendingCount={pendingExpenseSheetCount}
-                />
-                </nav>
-              </div>
-            </>
-          )}
-
           <main className="flex-1 p-4 lg:p-8 max-w-[1600px] w-full mx-auto">
             <Outlet />
           </main>
@@ -915,19 +953,32 @@ const AdminLayout = () => {
     <>
       <IntranetAttentionDialogs />
     <div className="min-h-screen bg-background flex flex-col">
-      <header className="border-b bg-card/95 backdrop-blur supports-[backdrop-filter]:bg-card/60 sticky top-0 z-10">
-        <div className="flex h-14 items-center justify-between px-4 lg:px-6 max-w-7xl mx-auto w-full gap-2">
-          <div className="flex items-center gap-2 min-w-0">
-            <Button
-              variant="ghost"
-              size="icon"
-              className="md:hidden shrink-0"
-              onClick={() => setMobileNavOpen((o) => !o)}
-              aria-label={t("admin.layout.menu")}
-            >
-              <Menu className="h-5 w-5" />
-            </Button>
-            <h1 className="font-semibold text-lg tracking-tight truncate">{t("admin.common.backoffice")}</h1>
+      <header className="sticky top-0 z-10 border-b bg-card/95 backdrop-blur supports-[backdrop-filter]:bg-card/60">
+        <div className="mx-auto flex h-14 w-full max-w-7xl items-center justify-between gap-2 px-4 lg:px-6">
+          <div className="flex min-w-0 flex-1 items-center gap-2">
+            <div className="relative shrink-0">
+              <Button
+                variant="ghost"
+                size="icon"
+                className="md:hidden"
+                onClick={() => setMobileNavOpen((o) => !o)}
+                aria-label={mobileNavOpen ? t("admin.layout.close_menu") : t("admin.layout.menu")}
+              >
+                {mobileNavOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
+              </Button>
+              {mobileNavOpen ? (
+                <div className="md:hidden absolute left-2 top-full z-50 mt-1.5 w-[min(18rem,calc(100vw-2rem))] rounded-lg border border-slate-200 bg-white py-2 shadow-lg animate-in slide-in-from-top-2 fade-in duration-200">
+                  <nav className="max-h-[min(65vh,calc(100vh-9rem))] space-y-0.5 overflow-y-auto p-2 text-sm">
+                    <NavLinks
+                      mobile
+                      vacationNotifyCount={pendingVacationRequestCount}
+                      expensePendingCount={pendingExpenseSheetCount}
+                    />
+                  </nav>
+                </div>
+              ) : null}
+            </div>
+            <h1 className="truncate text-lg font-semibold tracking-tight">{t("admin.common.backoffice")}</h1>
             {user && (
               <>
                 <span className="text-muted-foreground text-sm hidden sm:inline truncate">
@@ -955,7 +1006,7 @@ const AdminLayout = () => {
         </div>
       </header>
 
-      <div className="flex flex-1 max-w-7xl mx-auto w-full">
+      <div className="mx-auto flex w-full max-w-7xl flex-1">
         <aside className="hidden md:flex w-56 shrink-0 border-r bg-muted/30 flex-col py-4">
           <nav className="px-2 space-y-1">
             <NavLinks
@@ -964,18 +1015,6 @@ const AdminLayout = () => {
             />
           </nav>
         </aside>
-
-        {mobileNavOpen && (
-          <div className="md:hidden fixed inset-0 z-20 bg-background/80 backdrop-blur-sm top-14">
-            <nav className="flex max-h-[calc(100vh-3.5rem)] flex-col gap-1 overflow-y-auto border-b bg-card p-4">
-              <NavLinks
-                  mobile
-                  vacationNotifyCount={pendingVacationRequestCount}
-                  expensePendingCount={pendingExpenseSheetCount}
-                />
-            </nav>
-          </div>
-        )}
 
         <main className="flex-1 p-4 lg:p-8 overflow-auto">
           <Outlet />
