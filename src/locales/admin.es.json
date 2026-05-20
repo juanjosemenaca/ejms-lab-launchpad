@@ -1291,6 +1291,7 @@
     "collection_filter_clear": "Quitar filtro de cobro pendiente",
     "empty_collection_filter_issued": "Ninguna factura emitida coincide con el filtro de cobro pendiente.",
     "issued_filters_title": "Filtros de facturas emitidas",
+    "issued_filters_year_default_hint": "Por defecto se muestran las emitidas del año en curso (desde enero hasta hoy). Ajusta las fechas o quítalas para ver otro periodo.",
     "search_ph": "Buscar por número, cliente, NIF o notas",
     "filter_from": "Fecha desde",
     "filter_to": "Fecha hasta",

@@ -1291,6 +1291,7 @@
     "collection_filter_clear": "Treure filtre de cobrament pendent",
     "empty_collection_filter_issued": "Cap factura emesa coincideix amb el filtre de cobrament pendent.",
     "issued_filters_title": "Filtres de factures emeses",
+    "issued_filters_year_default_hint": "Per defecte es mostren les emeses de l'any en curs (de gener fins avui). Ajusta les dates o esborra-les per veure un altre període.",
     "search_ph": "Cerca per número, client, NIF o notes",
     "filter_from": "Data des de",
     "filter_to": "Data fins a",

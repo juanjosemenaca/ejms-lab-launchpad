@@ -115,6 +115,26 @@ function addCalendarMonthsYmd(isoYmd: string, monthsToAdd: number): string {
   return `${y}-${m}-${d}`;
 }
 
+function localTodayYmd(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+function currentYearStartYmd(): string {
+  return `${new Date().getFullYear()}-01-01`;
+}
+
+/** Fecha comparable para filtros de emitidas (fecha factura o emisión). */
+function billingIssuedComparableYmd(inv: BillingInvoiceRecord): string | null {
+  const raw = inv.issueDate?.trim() ?? inv.issuedAt?.trim() ?? "";
+  const ymd = raw.slice(0, 10);
+  return /^\d{4}-\d{2}-\d{2}$/.test(ymd) ? ymd : null;
+}
+
+function applyIssuedYtdDateRangeDefaults(): { from: string; to: string } {
+  return { from: currentYearStartYmd(), to: localTodayYmd() };
+}
+
 const NEW_DRAFT_COPY_LINES_NONE = "__none__";
 
 /**
@@ -411,8 +431,8 @@ const AdminBilling = () => {
   const [issuedSearch, setIssuedSearch] = useState("");
   const [issuedClientIdFilter, setIssuedClientIdFilter] = useState("all");
   const [issuedIssuerIdFilter, setIssuedIssuerIdFilter] = useState("all");
-  const [issuedFromDate, setIssuedFromDate] = useState("");
-  const [issuedToDate, setIssuedToDate] = useState("");
+  const [issuedFromDate, setIssuedFromDate] = useState(() => applyIssuedYtdDateRangeDefaults().from);
+  const [issuedToDate, setIssuedToDate] = useState(() => applyIssuedYtdDateRangeDefaults().to);
   const [issuerFormOpen, setIssuerFormOpen] = useState(false);
   const [seriesCreateOpen, setSeriesCreateOpen] = useState(false);
   const [newDraftFormOpen, setNewDraftFormOpen] = useState(false);
@@ -540,8 +560,13 @@ const AdminBilling = () => {
         const { y, m } = issuedGroupYearMonth(inv);
         if (y !== ys || m !== ms) return false;
       } else {
-        if (issuedFromDate && (inv.issueDate ?? "") < issuedFromDate) return false;
-        if (issuedToDate && (inv.issueDate ?? "") > issuedToDate) return false;
+        const ymd = billingIssuedComparableYmd(inv);
+        if (issuedFromDate) {
+          if (!ymd || ymd < issuedFromDate) return false;
+        }
+        if (issuedToDate) {
+          if (!ymd || ymd > issuedToDate) return false;
+        }
       }
       if (issuedClientIdFilter !== "all" && inv.clientId !== issuedClientIdFilter) return false;
       if (issuedIssuerIdFilter !== "all" && inv.issuerId !== issuedIssuerIdFilter) return false;
@@ -662,6 +687,9 @@ const AdminBilling = () => {
       } else if (effectiveTab === "issued") {
         setInvoiceListIssuedYm(null);
         setInvoiceListDraftYm(null);
+        const ytd = applyIssuedYtdDateRangeDefaults();
+        setIssuedFromDate(ytd.from);
+        setIssuedToDate(ytd.to);
       }
     }
 
@@ -1929,6 +1957,9 @@ const AdminBilling = () => {
               <CardTitle className="text-base">{t("admin.billing.issued_filters_title")}</CardTitle>
             </CardHeader>
             <CardContent className="space-y-3">
+              {!invoiceListIssuedYm ? (
+                <p className="text-xs text-muted-foreground">{t("admin.billing.issued_filters_year_default_hint")}</p>
+              ) : null}
               {invoiceListIssuedYm && /^\d{4}-\d{2}$/.test(invoiceListIssuedYm) ? (
                 <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-primary/20 bg-primary/5 px-3 py-2 text-sm">
                   <span className="text-muted-foreground">
@@ -1943,7 +1974,18 @@ const AdminBilling = () => {
                     <span className="mx-1">·</span>
                     {t("admin.billing.month_filter_dates_disabled_hint")}
                   </span>
-                  <Button type="button" variant="ghost" size="sm" className="h-8 shrink-0" onClick={() => setInvoiceListIssuedYm(null)}>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="h-8 shrink-0"
+                    onClick={() => {
+                      setInvoiceListIssuedYm(null);
+                      const ytd = applyIssuedYtdDateRangeDefaults();
+                      setIssuedFromDate(ytd.from);
+                      setIssuedToDate(ytd.to);
+                    }}
+                  >
                     {t("admin.billing.month_filter_clear")}
                   </Button>
                 </div>

@@ -1291,6 +1291,7 @@
     "collection_filter_clear": "Clear outstanding filter",
     "empty_collection_filter_issued": "No issued invoices match the outstanding-collection filter.",
     "issued_filters_title": "Issued invoices filters",
+    "issued_filters_year_default_hint": "By default, issued invoices for the current year are shown (January through today). Adjust or clear the dates to view another period.",
     "search_ph": "Search by number, client, tax ID or notes",
     "filter_from": "Date from",
     "filter_to": "Date to",
