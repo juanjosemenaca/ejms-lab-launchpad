@@ -14,16 +14,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { SortableTableHead } from "@/components/admin/SortableTableHead";
 import { sortRows, toggleColumnSort, type ColumnSort } from "@/lib/adminListUtils";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
+import { DoubleConfirmAlertDialog } from "@/components/ui/double-confirm-alert-dialog";
 import { useProjects } from "@/hooks/useProjects";
 import { useClients } from "@/hooks/useClients";
 import { useCompanyWorkers } from "@/hooks/useCompanyWorkers";
@@ -38,6 +29,10 @@ import {
 import type { ProjectMemberInput } from "@/api/projectsApi";
 import { PROJECT_MEMBER_ROLES, type ProjectMemberRole } from "@/types/projects";
 import { queryKeys } from "@/lib/queryKeys";
+import {
+  completenessDotClass,
+  getProjectCompleteness,
+} from "@/lib/adminEntityCompleteness";
 import type { ProjectWithDocuments } from "@/types/projects";
 import { ProjectFormDialog, type ProjectFormValues } from "@/components/admin/ProjectFormDialog";
 import { useLanguage } from "@/contexts/LanguageContext";
@@ -235,6 +230,17 @@ const AdminProjects = () => {
     }
   };
 
+  const projectCompletenessMeta = (p: ProjectWithDocuments, client: (typeof clients)[number] | undefined) => {
+    const comp = getProjectCompleteness(p, client);
+    const label =
+      comp.level === "green"
+        ? t("admin.workers.completeness_green")
+        : comp.level === "yellow"
+          ? t("admin.workers.completeness_yellow")
+          : t("admin.workers.completeness_red");
+    return { dotClass: completenessDotClass(comp.level), label };
+  };
+
   const formLabels = {
     titleCreate: t("admin.projects.dialog_title_create"),
     titleEdit: t("admin.projects.dialog_title_edit"),
@@ -402,18 +408,30 @@ const AdminProjects = () => {
                 {sorted.map((p) => {
                   const cl = clients.find((c) => c.id === p.clientId);
                   const showFinal = cl?.clientKind === "INTERMEDIARIO";
+                  const sem = projectCompletenessMeta(p, cl);
                   return (
                     <TableRow key={p.id}>
                       <TableCell className="font-mono text-xs tabular-nums text-muted-foreground whitespace-nowrap">
                         {p.projectCode}
                       </TableCell>
                       <TableCell className="font-medium max-w-[220px]">
-                        <div className="truncate" title={p.title}>
-                          {p.title}
+                        <div className="flex items-start gap-2 min-w-0">
+                          <span
+                            className={`inline-block h-3.5 w-3.5 rounded-full ${sem.dotClass} ring-1 ring-black/10 dark:ring-white/20 shrink-0 mt-1`}
+                            title={sem.label}
+                            aria-label={sem.label}
+                          />
+                          <div className="min-w-0 flex-1">
+                            <div className="truncate" title={p.title}>
+                              {p.title}
+                            </div>
+                            {p.description && (
+                              <div className="text-xs text-muted-foreground font-normal line-clamp-1 mt-0.5">
+                                {p.description}
+                              </div>
+                            )}
+                          </div>
                         </div>
-                        {p.description && (
-                          <div className="text-xs text-muted-foreground line-clamp-1 mt-0.5">{p.description}</div>
-                        )}
                       </TableCell>
                       <TableCell className="text-sm">{clientLabel(p.clientId)}</TableCell>
                       <TableCell className="text-sm text-muted-foreground">
@@ -477,26 +495,20 @@ const AdminProjects = () => {
         onDeleteDocument={handleDeleteDocument}
       />
 
-      <AlertDialog open={!!deleteTarget} onOpenChange={() => setDeleteTarget(null)}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>{t("admin.projects.delete_title")}</AlertDialogTitle>
-            <AlertDialogDescription>
-              {t("admin.projects.delete_desc")} <strong>{deleteTarget?.title}</strong>{" "}
-              {t("admin.projects.delete_desc_suffix")}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>{t("admin.common.cancel")}</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={() => void confirmDelete()}
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-            >
-              {t("admin.common.delete")}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      <DoubleConfirmAlertDialog
+        open={!!deleteTarget}
+        onOpenChange={(o) => {
+          if (!o) setDeleteTarget(null);
+        }}
+        onConfirm={() => void confirmDelete()}
+        title={t("admin.projects.delete_title")}
+        description={
+          <>
+            {t("admin.projects.delete_desc")} <strong>{deleteTarget?.title}</strong>{" "}
+            {t("admin.projects.delete_desc_suffix")}
+          </>
+        }
+      />
     </div>
   );
 };

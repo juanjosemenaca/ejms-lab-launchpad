@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   BadgeEuro,
@@ -20,15 +21,10 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/component
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { SearchableSelect } from "@/components/ui/searchable-select";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableFooter, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import {
@@ -40,6 +36,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { DoubleConfirmAlertDialog } from "@/components/ui/double-confirm-alert-dialog";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { useToast } from "@/hooks/use-toast";
 import { useClients } from "@/hooks/useClients";
@@ -74,14 +71,22 @@ import {
 import { isInormeInformaticaOrganizacionIssuer } from "@/lib/billingPrivacyFooter";
 import {
   draftGroupYearMonth,
+  formatInvoiceMonthHeading,
   formatInvoiceMonthOnly,
   groupInvoicesByIssuerAndMonth,
   issuedGroupYearMonth,
 } from "@/lib/billingInvoiceGroups";
+import {
+  BILLING_COLLECTION_EPS,
+  billingCollectionSemaphore,
+  billingInvoiceHasCollectionOutstanding,
+} from "@/lib/billingCollectionSemaphore";
 import { parseInvoiceAddresseeOptions } from "@/lib/invoiceAddresseeOptions";
+import { cn } from "@/lib/utils";
 import type { ClientRecord } from "@/types/clients";
 import type {
   BillingInvoiceLineInput,
+  BillingInvoiceLineRecord,
   BillingInvoiceRecord,
   BillingIssuerRecord,
   BillingSeriesRecord,
@@ -112,6 +117,24 @@ function addCalendarMonthsYmd(isoYmd: string, monthsToAdd: number): string {
 
 const NEW_DRAFT_COPY_LINES_NONE = "__none__";
 
+/**
+ * Serie por defecto al crear un borrador nuevo: la «general» del emisor
+ * (en datos semilla el código es `A`; numeración tipo A-AAAA/NNNN).
+ */
+function pickDefaultSeriesForNewDraft(seriesList: BillingSeriesRecord[]): BillingSeriesRecord | undefined {
+  if (seriesList.length === 0) return undefined;
+  const codeNorm = (code: string) => code.trim();
+  const exactA = seriesList.find((s) => codeNorm(s.code).toUpperCase() === "A");
+  if (exactA) return exactA;
+  const aHyphen = seriesList.find((s) => /^A-/i.test(codeNorm(s.code)));
+  if (aHyphen) return aHyphen;
+  const generalLabel = seriesList.find((s) => /\bgeneral\b/i.test(s.label));
+  if (generalLabel) return generalLabel;
+  return [...seriesList].sort((a, b) =>
+    codeNorm(a.code).localeCompare(codeNorm(b.code), undefined, { sensitivity: "base" })
+  )[0];
+}
+
 /** Etiqueta compacta para elegir factura origen (mismo cliente). */
 function formatInvoiceCopySourceLabel(inv: BillingInvoiceRecord, localeTag: string, draftLabel: string): string {
   const ref =
@@ -126,6 +149,95 @@ function formatInvoiceCopySourceLabel(inv: BillingInvoiceRecord, localeTag: stri
     : "—";
   const money = new Intl.NumberFormat(localeTag, { style: "currency", currency: "EUR" }).format(inv.grandTotal);
   return `${ref} · ${dateLabel} · ${money}`;
+}
+
+function invoiceCopySourceLineTypeLabel(lineType: BillingInvoiceLineRecord["lineType"], t: (key: string) => string): string {
+  switch (lineType) {
+    case "BILLABLE":
+      return t("admin.billing.line_type_billable");
+    case "BLOCK_TITLE":
+      return t("admin.billing.line_type_block_title");
+    case "BLOCK_SUBTITLE":
+      return t("admin.billing.line_type_block_subtitle");
+    case "CONCEPT":
+      return t("admin.billing.line_type_concept");
+    default:
+      return lineType;
+  }
+}
+
+/** Palabras extra para filtrar en el selector (además del número/fecha/total). */
+function buildInvoiceCopySourceKeywords(inv: BillingInvoiceRecord, headerLabel: string): string[] {
+  const set = new Set<string>();
+  const add = (s: string | null | undefined) => {
+    const v = (s ?? "").trim();
+    if (v) set.add(v);
+  };
+  add(headerLabel);
+  if (inv.invoiceNumber != null && inv.fiscalYear != null) {
+    add(`${inv.seriesCode}-${inv.fiscalYear}/${String(inv.invoiceNumber).padStart(4, "0")}`);
+  }
+  add(inv.seriesCode);
+  for (const line of inv.lines) {
+    add(line.description);
+    add(String(line.quantity));
+    add(String(line.unitPrice));
+    add(String(line.lineTotal));
+  }
+  return [...set];
+}
+
+function InvoiceCopySourceOptionPreview(props: {
+  inv: BillingInvoiceRecord;
+  headerLabel: string;
+  localeTag: string;
+  t: (key: string) => string;
+}) {
+  const { inv, headerLabel, localeTag, t } = props;
+  const moneyFmt = new Intl.NumberFormat(localeTag, { style: "currency", currency: "EUR" });
+  const qtyFmt = new Intl.NumberFormat(localeTag, { maximumFractionDigits: 4 });
+  const sorted = [...inv.lines].sort((a, b) => a.lineOrder - b.lineOrder);
+
+  return (
+    <div className="space-y-1.5 py-0.5">
+      <div className="font-medium leading-snug text-foreground">{headerLabel}</div>
+      <ul className="max-h-36 space-y-1.5 overflow-y-auto border-l-2 border-border pl-2">
+        {sorted.map((line) => {
+          const typeLbl = invoiceCopySourceLineTypeLabel(line.lineType, t);
+          if (line.lineType !== "BILLABLE") {
+            return (
+              <li key={line.id} className="text-xs leading-snug text-muted-foreground">
+                <span className="font-medium text-foreground/90">{typeLbl}</span>
+                {line.description.trim() ? (
+                  <>
+                    <span className="mx-1">·</span>
+                    <span className="break-words">{line.description}</span>
+                  </>
+                ) : null}
+              </li>
+            );
+          }
+          const pctRaw = line.billableHoursPercent;
+          const pctRounded = pctRaw != null ? Math.round(Number(pctRaw)) : 100;
+          const pctSuffix =
+            pctRaw != null && Number.isFinite(Number(pctRaw)) && pctRounded !== 100 ? ` · ${pctRounded}%` : "";
+          const desc = line.description.trim() || "—";
+          return (
+            <li key={line.id} className="text-xs leading-snug text-muted-foreground">
+              <div className="break-words text-foreground/95">{desc}</div>
+              <div className="mt-0.5 grid grid-cols-[1fr_auto] gap-x-2 text-[11px] tabular-nums">
+                <span className="min-w-0">
+                  {qtyFmt.format(line.quantity)} × {moneyFmt.format(line.unitPrice)}
+                  {pctSuffix}
+                </span>
+                <span className="shrink-0 font-medium text-foreground">{moneyFmt.format(line.lineTotal)}</span>
+              </div>
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  );
 }
 
 /** Compara el borrador en pantalla con la última versión guardada en servidor. */
@@ -239,6 +351,23 @@ function mergeProformaHeaderFromForm(
   };
 }
 
+function issuedCollectionSemaphoreTitle(
+  inv: BillingInvoiceRecord,
+  translate: (key: string) => string
+): string {
+  const sem = billingCollectionSemaphore(inv);
+  if (sem === "full") return translate("admin.billing.collection_semaphore_full");
+  if (sem === "partial") return translate("admin.billing.collection_semaphore_partial");
+  if (sem === "none") return translate("admin.billing.collection_semaphore_none");
+  return translate("admin.billing.collection_semaphore_na");
+}
+
+function parseReceiptAmountInput(raw: string): number | null {
+  const n = Number(String(raw).trim().replace(",", "."));
+  if (!Number.isFinite(n) || n <= 0) return null;
+  return Math.round(n * 100) / 100;
+}
+
 function variantByStatus(status: BillingInvoiceRecord["status"]): "outline" | "default" | "destructive" | "secondary" {
   if (status === "PAID") return "default";
   if (status === "CANCELLED") return "destructive";
@@ -250,6 +379,8 @@ const AdminBilling = () => {
   const { t, language } = useLanguage();
   const { toast } = useToast();
   const qc = useQueryClient();
+  const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const localeTag = language === "en" ? "en-GB" : language === "ca" ? "ca-ES" : "es-ES";
   const { data: clients = [] } = useClients();
   const { data: issuers = [] } = useBillingIssuers(true);
@@ -261,6 +392,8 @@ const AdminBilling = () => {
   const [newIssuerId, setNewIssuerId] = useState("");
   const [newSeriesIssuerId, setNewSeriesIssuerId] = useState("");
   const [rectificativeSeriesId, setRectificativeSeriesId] = useState("");
+  /** Obligatorio al crear borrador rectificativo desde factura emitida. */
+  const [rectificativeReason, setRectificativeReason] = useState("");
   const [newSeriesCode, setNewSeriesCode] = useState("");
   const [newSeriesLabel, setNewSeriesLabel] = useState("");
   const [newClientId, setNewClientId] = useState("");
@@ -270,6 +403,11 @@ const AdminBilling = () => {
   /** Factura existente (mismo cliente) de la que copiar líneas al crear el borrador; `NEW_DRAFT_COPY_LINES_NONE` = empezar de cero. */
   const [newCopyLinesFromInvoiceId, setNewCopyLinesFromInvoiceId] = useState(NEW_DRAFT_COPY_LINES_NONE);
   const [billingTab, setBillingTab] = useState<BillingTab>("drafts");
+  /** Filtro por mes natural (YYYY-MM), p. ej. desde el panel de control; usa la misma agrupación que el listado. */
+  const [invoiceListDraftYm, setInvoiceListDraftYm] = useState<string | null>(null);
+  const [invoiceListIssuedYm, setInvoiceListIssuedYm] = useState<string | null>(null);
+  /** Desde URL (`collection=outstanding`) o panel: solo facturas con saldo por cobrar. */
+  const [issuedCollectionFilter, setIssuedCollectionFilter] = useState<"all" | "outstanding">("all");
   const [issuedSearch, setIssuedSearch] = useState("");
   const [issuedClientIdFilter, setIssuedClientIdFilter] = useState("all");
   const [issuedIssuerIdFilter, setIssuedIssuerIdFilter] = useState("all");
@@ -302,6 +440,14 @@ const AdminBilling = () => {
   }, [series, selectedInvoice]);
   const editable = selectedInvoice?.status === "DRAFT";
 
+  /** Saldo pendiente de cobro (€) en factura emitida/cobrada parcial; null si borrador o anulada. */
+  const issuedReceiptRemainingEuro = useMemo(() => {
+    if (!selectedInvoice || selectedInvoice.status === "DRAFT" || selectedInvoice.status === "CANCELLED") return null;
+    const gt = Number(selectedInvoice.grandTotal) || 0;
+    const col = Number(selectedInvoice.collectedTotal) || 0;
+    return Math.max(0, Math.round((gt - col) * 100) / 100);
+  }, [selectedInvoice]);
+
   const [draftDueDate, setDraftDueDate] = useState("");
   /** Fecha de factura forzada (borrador). Vacío = al emitir se usará la fecha del momento. */
   const [draftIssueDate, setDraftIssueDate] = useState("");
@@ -314,11 +460,30 @@ const AdminBilling = () => {
   const afterDraftSaveNavRef = useRef<null | { type: "select"; id: string } | { type: "tab"; next: BillingTab }>(null);
   const [draftLeaveDialogOpen, setDraftLeaveDialogOpen] = useState(false);
   const [pendingDraftLeave, setPendingDraftLeave] = useState<DraftLeaveIntent | null>(null);
+  const [deleteDraftConfirmId, setDeleteDraftConfirmId] = useState<string | null>(null);
+  const [deleteTestInvoiceOpen, setDeleteTestInvoiceOpen] = useState(false);
 
   const [receiptDate, setReceiptDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [receiptAmount, setReceiptAmount] = useState("");
+  /** Cobro del saldo pendiente completo vs importe manual (varios parciales hasta completar). */
+  const [receiptAmountMode, setReceiptAmountMode] = useState<"partial" | "full">("partial");
   const [receiptMethod, setReceiptMethod] = useState("BANK_TRANSFER");
   const [receiptReference, setReceiptReference] = useState("");
+
+  useEffect(() => {
+    setReceiptAmountMode("partial");
+    setReceiptAmount("");
+  }, [selectedInvoiceId]);
+
+  useEffect(() => {
+    if (
+      receiptAmountMode !== "full" ||
+      issuedReceiptRemainingEuro == null ||
+      issuedReceiptRemainingEuro <= BILLING_COLLECTION_EPS
+    )
+      return;
+    setReceiptAmount(issuedReceiptRemainingEuro.toFixed(2));
+  }, [receiptAmountMode, issuedReceiptRemainingEuro]);
 
   const seriesForNewDraft = useMemo(
     () => series.filter((s) => s.active && s.issuerId === newIssuerId),
@@ -335,6 +500,15 @@ const AdminBilling = () => {
     [issuers, draftIssuerId]
   );
   const draftInvoices = useMemo(() => invoices.filter((i) => i.status === "DRAFT"), [invoices]);
+  const draftInvoicesDisplayed = useMemo(() => {
+    if (!invoiceListDraftYm || !/^\d{4}-\d{2}$/.test(invoiceListDraftYm)) return draftInvoices;
+    const ys = Number(invoiceListDraftYm.slice(0, 4));
+    const ms = Number(invoiceListDraftYm.slice(5, 7));
+    return draftInvoices.filter((inv) => {
+      const { y, m } = draftGroupYearMonth(inv);
+      return y === ys && m === ms;
+    });
+  }, [draftInvoices, invoiceListDraftYm]);
   const issuedInvoices = useMemo(() => invoices.filter((i) => i.status !== "DRAFT"), [invoices]);
   /** Facturas del cliente con al menos una línea (emitidas, cobradas o borradores), para reutilizar conceptos/importes. */
   const invoicesForNewDraftLineCopy = useMemo(() => {
@@ -360,10 +534,18 @@ const AdminBilling = () => {
   const issuedInvoicesFiltered = useMemo(() => {
     const q = issuedSearch.trim().toLowerCase();
     return issuedInvoices.filter((inv) => {
+      if (invoiceListIssuedYm && /^\d{4}-\d{2}$/.test(invoiceListIssuedYm)) {
+        const ys = Number(invoiceListIssuedYm.slice(0, 4));
+        const ms = Number(invoiceListIssuedYm.slice(5, 7));
+        const { y, m } = issuedGroupYearMonth(inv);
+        if (y !== ys || m !== ms) return false;
+      } else {
+        if (issuedFromDate && (inv.issueDate ?? "") < issuedFromDate) return false;
+        if (issuedToDate && (inv.issueDate ?? "") > issuedToDate) return false;
+      }
       if (issuedClientIdFilter !== "all" && inv.clientId !== issuedClientIdFilter) return false;
       if (issuedIssuerIdFilter !== "all" && inv.issuerId !== issuedIssuerIdFilter) return false;
-      if (issuedFromDate && (inv.issueDate ?? "") < issuedFromDate) return false;
-      if (issuedToDate && (inv.issueDate ?? "") > issuedToDate) return false;
+      if (issuedCollectionFilter === "outstanding" && !billingInvoiceHasCollectionOutstanding(inv)) return false;
       if (!q) return true;
       const number =
         inv.invoiceNumber && inv.fiscalYear
@@ -374,12 +556,21 @@ const AdminBilling = () => {
         .toLowerCase();
       return hay.includes(q);
     });
-  }, [issuedInvoices, issuedSearch, issuedClientIdFilter, issuedIssuerIdFilter, issuedFromDate, issuedToDate]);
+  }, [
+    issuedInvoices,
+    issuedSearch,
+    issuedClientIdFilter,
+    issuedIssuerIdFilter,
+    issuedFromDate,
+    issuedToDate,
+    invoiceListIssuedYm,
+    issuedCollectionFilter,
+  ]);
 
   const issuerOrderForGrouping = useMemo(() => issuers.map((i) => ({ id: i.id, code: i.code })), [issuers]);
   const draftGrouped = useMemo(
-    () => groupInvoicesByIssuerAndMonth(draftInvoices, draftGroupYearMonth, issuerOrderForGrouping),
-    [draftInvoices, issuerOrderForGrouping]
+    () => groupInvoicesByIssuerAndMonth(draftInvoicesDisplayed, draftGroupYearMonth, issuerOrderForGrouping),
+    [draftInvoicesDisplayed, issuerOrderForGrouping]
   );
   const issuedGrouped = useMemo(
     () => groupInvoicesByIssuerAndMonth(issuedInvoicesFiltered, issuedGroupYearMonth, issuerOrderForGrouping),
@@ -431,12 +622,60 @@ const AdminBilling = () => {
   }, [clients, newClientId]);
 
   useEffect(() => {
+    const tab = searchParams.get("tab");
+    const period = searchParams.get("period");
+    const collectionRaw = searchParams.get("collection");
+    const hasAny =
+      tab !== null || period !== null || collectionRaw !== null;
+
+    if (!hasAny) return;
+
+    const effectiveTab: BillingTab | null =
+      collectionRaw === "outstanding"
+        ? "issued"
+        : tab === "drafts" || tab === "issued" || tab === "series" || tab === "issuers"
+          ? tab
+          : null;
+
+    if (effectiveTab) {
+      setBillingTab(effectiveTab);
+    }
+
+    if (collectionRaw === "outstanding") {
+      setIssuedCollectionFilter("outstanding");
+    } else {
+      setIssuedCollectionFilter("all");
+    }
+
+    if (period && /^\d{4}-\d{2}$/.test(period)) {
+      if (effectiveTab === "drafts") {
+        setInvoiceListDraftYm(period);
+        setInvoiceListIssuedYm(null);
+      } else if (effectiveTab === "issued") {
+        setInvoiceListIssuedYm(period);
+        setInvoiceListDraftYm(null);
+      }
+    } else {
+      if (effectiveTab === "drafts") {
+        setInvoiceListDraftYm(null);
+        setInvoiceListIssuedYm(null);
+      } else if (effectiveTab === "issued") {
+        setInvoiceListIssuedYm(null);
+        setInvoiceListDraftYm(null);
+      }
+    }
+
+    navigate("/admin/facturacion", { replace: true });
+  }, [searchParams, navigate]);
+
+  useEffect(() => {
     if (seriesForNewDraft.length === 0) {
       setNewSeriesId("");
       return;
     }
     if (!newSeriesId || !seriesForNewDraft.some((s) => s.id === newSeriesId)) {
-      setNewSeriesId(seriesForNewDraft[0].id);
+      const preferred = pickDefaultSeriesForNewDraft(seriesForNewDraft);
+      if (preferred) setNewSeriesId(preferred.id);
     }
   }, [seriesForNewDraft, newSeriesId]);
 
@@ -479,6 +718,10 @@ const AdminBilling = () => {
   }, [seriesForRectificative, rectificativeSeriesId]);
 
   useEffect(() => {
+    setRectificativeReason("");
+  }, [selectedInvoiceId]);
+
+  useEffect(() => {
     let cancelled = false;
     if (!editingIssuerId) {
       setIssuerLogoPreviewUrl("");
@@ -501,7 +744,11 @@ const AdminBilling = () => {
   /** Si el id seleccionado ya no está en la pestaña actual (p. ej. emitido o borrado), limpiar; no auto-abrir el primero. */
   useEffect(() => {
     const scope =
-      billingTab === "drafts" ? draftInvoices : billingTab === "issued" ? issuedInvoicesFiltered : [];
+      billingTab === "drafts"
+        ? draftInvoicesDisplayed
+        : billingTab === "issued"
+          ? issuedInvoicesFiltered
+          : [];
     if (scope.length === 0) {
       setSelectedInvoiceId(null);
       return;
@@ -509,7 +756,7 @@ const AdminBilling = () => {
     if (selectedInvoiceId && !scope.some((x) => x.id === selectedInvoiceId)) {
       setSelectedInvoiceId(null);
     }
-  }, [billingTab, selectedInvoiceId, draftInvoices, issuedInvoicesFiltered]);
+  }, [billingTab, selectedInvoiceId, draftInvoicesDisplayed, issuedInvoicesFiltered]);
 
   useEffect(() => {
     if (!selectedInvoice) {
@@ -799,9 +1046,12 @@ const AdminBilling = () => {
     mutationFn: async () => {
       if (!selectedInvoice) throw new Error("Factura no encontrada.");
       if (!rectificativeSeriesId) throw new Error("Selecciona serie.");
-      return createRectificativeDraftFromInvoice(selectedInvoice.id, rectificativeSeriesId);
+      const reason = rectificativeReason.trim();
+      if (!reason) throw new Error(t("admin.billing.rectificative_reason_required_error"));
+      return createRectificativeDraftFromInvoice(selectedInvoice.id, rectificativeSeriesId, reason);
     },
     onSuccess: async (draft) => {
+      setRectificativeReason("");
       await invalidateAll();
       setSelectedInvoiceId(draft.id);
       toast({ title: t("admin.billing.toast_rectificative_created") });
@@ -832,6 +1082,7 @@ const AdminBilling = () => {
   const deleteDraftMutation = useMutation({
     mutationFn: (invoiceId: string) => deleteBillingInvoiceDraft(invoiceId),
     onSuccess: async (_, invoiceId) => {
+      setDeleteDraftConfirmId(null);
       await invalidateAll();
       if (selectedInvoiceId === invoiceId) setSelectedInvoiceId(null);
       toast({ title: t("admin.billing.toast_draft_deleted") });
@@ -847,11 +1098,10 @@ const AdminBilling = () => {
   const deleteMutation = useMutation({
     mutationFn: async () => {
       if (!selectedInvoice) throw new Error("Factura no encontrada.");
-      const ok = window.confirm(t("admin.billing.delete_confirm_test_mode"));
-      if (!ok) return;
       await deleteBillingInvoiceForTests(selectedInvoice.id);
     },
     onSuccess: async () => {
+      setDeleteTestInvoiceOpen(false);
       const prevId = selectedInvoiceId;
       await invalidateAll();
       if (prevId === selectedInvoiceId) setSelectedInvoiceId(null);
@@ -868,10 +1118,30 @@ const AdminBilling = () => {
   const receiptMutation = useMutation({
     mutationFn: async () => {
       if (!selectedInvoice) throw new Error("Factura no encontrada.");
+      if (
+        issuedReceiptRemainingEuro == null ||
+        issuedReceiptRemainingEuro <= BILLING_COLLECTION_EPS
+      ) {
+        throw new Error(t("admin.billing.receipt_error_nothing_pending"));
+      }
+      const amountEuro =
+        receiptAmountMode === "full"
+          ? issuedReceiptRemainingEuro
+          : parseReceiptAmountInput(receiptAmount);
+      if (amountEuro == null) {
+        throw new Error(t("admin.billing.receipt_error_invalid_amount"));
+      }
+      if (amountEuro > issuedReceiptRemainingEuro + BILLING_COLLECTION_EPS) {
+        const maxFmt = issuedReceiptRemainingEuro.toLocaleString(localeTag, {
+          minimumFractionDigits: 2,
+          maximumFractionDigits: 2,
+        });
+        throw new Error(t("admin.billing.receipt_error_exceeds_pending").replace("{{max}}", maxFmt));
+      }
       await registerBillingReceipt({
         invoiceId: selectedInvoice.id,
         receiptDate,
-        amount: Number(receiptAmount.replace(",", ".")),
+        amount: amountEuro,
         method: receiptMethod,
         reference: receiptReference,
       });
@@ -879,6 +1149,7 @@ const AdminBilling = () => {
     onSuccess: async () => {
       await invalidateAll();
       setReceiptAmount("");
+      setReceiptAmountMode("partial");
       setReceiptReference("");
       toast({ title: t("admin.billing.toast_receipt_saved") });
     },
@@ -891,6 +1162,11 @@ const AdminBilling = () => {
   });
 
   const seriesById = useMemo(() => new Map(series.map((s) => [s.id, s] as const)), [series]);
+
+  const receiptCanSubmit =
+    issuedReceiptRemainingEuro != null &&
+    issuedReceiptRemainingEuro > BILLING_COLLECTION_EPS &&
+    (receiptAmountMode === "full" || parseReceiptAmountInput(receiptAmount) != null);
 
   return (
     <>
@@ -1189,18 +1465,16 @@ const AdminBilling = () => {
                   <div className="flex flex-col gap-4 xl:hidden">
                     <div className="space-y-1.5">
                       <Label htmlFor="billing-series-issuer-sm">{t("admin.billing.series_issuer")}</Label>
-                      <Select value={newSeriesIssuerId} onValueChange={setNewSeriesIssuerId}>
-                        <SelectTrigger id="billing-series-issuer-sm" className="h-10 w-full">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {activeIssuers.map((i) => (
-                            <SelectItem key={i.id} value={i.id}>
-                              {i.code} · {i.legalName}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                      <SearchableSelect
+                        id="billing-series-issuer-sm"
+                        value={newSeriesIssuerId}
+                        onValueChange={setNewSeriesIssuerId}
+                        options={activeIssuers.map((i) => ({
+                          value: i.id,
+                          label: `${i.code} · ${i.legalName}`,
+                        }))}
+                        className="h-10 w-full"
+                      />
                     </div>
                     <div className="space-y-1.5">
                       <Label htmlFor="billing-series-code-sm">{t("admin.billing.col_series")}</Label>
@@ -1245,18 +1519,16 @@ const AdminBilling = () => {
                     </Label>
                     <span className="block min-h-[1.25rem] select-none" aria-hidden />
 
-                    <Select value={newSeriesIssuerId} onValueChange={setNewSeriesIssuerId}>
-                      <SelectTrigger id="billing-series-issuer" className="h-10 w-full">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {activeIssuers.map((i) => (
-                          <SelectItem key={i.id} value={i.id}>
-                            {i.code} · {i.legalName}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                    <SearchableSelect
+                      id="billing-series-issuer"
+                      value={newSeriesIssuerId}
+                      onValueChange={setNewSeriesIssuerId}
+                      options={activeIssuers.map((i) => ({
+                        value: i.id,
+                        label: `${i.code} · ${i.legalName}`,
+                      }))}
+                      className="h-10 w-full"
+                    />
                     <Input
                       id="billing-series-code"
                       placeholder={t("admin.billing.series_code_ph")}
@@ -1334,6 +1606,27 @@ const AdminBilling = () => {
               <div className="space-y-1">
                 <CardTitle className="text-base">{t("admin.billing.drafts_title")}</CardTitle>
                 <CardDescription>{t("admin.billing.drafts_group_hint")}</CardDescription>
+                {invoiceListDraftYm && /^\d{4}-\d{2}$/.test(invoiceListDraftYm) ? (
+                  <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-primary/20 bg-primary/5 px-3 py-2 text-sm">
+                    <span className="font-medium text-foreground">
+                      {formatInvoiceMonthHeading(
+                        localeTag,
+                        Number(invoiceListDraftYm.slice(0, 4)),
+                        Number(invoiceListDraftYm.slice(5, 7)),
+                        invoiceListDraftYm
+                      )}
+                    </span>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="h-8 shrink-0"
+                      onClick={() => setInvoiceListDraftYm(null)}
+                    >
+                      {t("admin.billing.month_filter_clear")}
+                    </Button>
+                  </div>
+                ) : null}
               </div>
               <div className="flex shrink-0 gap-2">
                 {newDraftFormOpen ? (
@@ -1355,8 +1648,14 @@ const AdminBilling = () => {
                   <Loader2 className="h-4 w-4 animate-spin" />
                   {t("admin.common.loading")}
                 </div>
-              ) : draftInvoices.length === 0 ? (
-                <p className="text-sm text-muted-foreground py-4">{t("admin.billing.empty")}</p>
+              ) : draftInvoicesDisplayed.length === 0 ? (
+                <p className="text-sm text-muted-foreground py-4">
+                  {draftInvoices.length === 0
+                    ? t("admin.billing.empty")
+                    : invoiceListDraftYm
+                      ? t("admin.billing.empty_month_filter_drafts")
+                      : t("admin.billing.empty")}
+                </p>
               ) : (
                 <div className="space-y-3">
                   {draftGrouped.map((ig, igIdx) => {
@@ -1466,10 +1765,7 @@ const AdminBilling = () => {
                                                                 size="sm"
                                                                 variant="outline"
                                                                 className="text-destructive border-destructive/40 hover:bg-destructive/10"
-                                                                onClick={() => {
-                                                                  if (!window.confirm(t("admin.billing.delete_draft_confirm"))) return;
-                                                                  deleteDraftMutation.mutate(inv.id);
-                                                                }}
+                                                                onClick={() => setDeleteDraftConfirmId(inv.id)}
                                                                 disabled={deleteDraftMutation.isPending}
                                                                 title={t("admin.billing.action_delete_draft")}
                                                               >
@@ -1521,48 +1817,36 @@ const AdminBilling = () => {
               <CardContent className="grid gap-3 sm:grid-cols-2">
                 <div className="space-y-1.5">
                   <Label>{t("admin.billing.col_issuer")}</Label>
-                  <Select value={newIssuerId} onValueChange={setNewIssuerId}>
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {activeIssuers.map((i) => (
-                        <SelectItem key={i.id} value={i.id}>
-                          {i.code} · {i.legalName}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  <SearchableSelect
+                    value={newIssuerId}
+                    onValueChange={setNewIssuerId}
+                    options={activeIssuers.map((i) => ({
+                      value: i.id,
+                      label: `${i.code} · ${i.legalName}`,
+                    }))}
+                  />
                 </div>
                 <div className="space-y-1.5">
                   <Label>{t("admin.billing.col_series")}</Label>
-                  <Select value={newSeriesId} onValueChange={setNewSeriesId}>
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {seriesForNewDraft.map((s) => (
-                        <SelectItem key={s.id} value={s.id}>
-                          {s.code} · {s.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  <SearchableSelect
+                    value={newSeriesId}
+                    onValueChange={setNewSeriesId}
+                    options={seriesForNewDraft.map((s) => ({
+                      value: s.id,
+                      label: `${s.code} · ${s.label}`,
+                    }))}
+                  />
                 </div>
                 <div className="space-y-1.5">
                   <Label>{t("admin.billing.col_client")}</Label>
-                  <Select value={newClientId} onValueChange={setNewClientId}>
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {clients.map((c) => (
-                        <SelectItem key={c.id} value={c.id}>
-                          {(c.companyName || c.tradeName || c.cif).trim()} · {c.cif}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  <SearchableSelect
+                    value={newClientId}
+                    onValueChange={setNewClientId}
+                    options={clients.map((c) => ({
+                      value: c.id,
+                      label: `${(c.companyName || c.tradeName || c.cif).trim()} · ${c.cif}`,
+                    }))}
+                  />
                 </div>
                 <div className="space-y-1.5 sm:col-span-2">
                   <Label>{t("admin.billing.new_draft_copy_lines_label")}</Label>
@@ -1570,19 +1854,37 @@ const AdminBilling = () => {
                   {invoicesForNewDraftLineCopy.length === 0 ? (
                     <p className="text-sm text-muted-foreground">{t("admin.billing.new_draft_copy_lines_empty")}</p>
                   ) : (
-                    <Select value={newCopyLinesFromInvoiceId} onValueChange={setNewCopyLinesFromInvoiceId}>
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value={NEW_DRAFT_COPY_LINES_NONE}>{t("admin.billing.new_draft_copy_lines_none")}</SelectItem>
-                        {invoicesForNewDraftLineCopy.map((inv) => (
-                          <SelectItem key={inv.id} value={inv.id}>
-                            {formatInvoiceCopySourceLabel(inv, localeTag, t("admin.billing.copy_source_draft_marker"))}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                    <SearchableSelect
+                      value={newCopyLinesFromInvoiceId}
+                      onValueChange={setNewCopyLinesFromInvoiceId}
+                      minPopoverWidth={420}
+                      options={[
+                        {
+                          value: NEW_DRAFT_COPY_LINES_NONE,
+                          label: t("admin.billing.new_draft_copy_lines_none"),
+                        },
+                        ...invoicesForNewDraftLineCopy.map((inv) => {
+                          const label = formatInvoiceCopySourceLabel(
+                            inv,
+                            localeTag,
+                            t("admin.billing.copy_source_draft_marker")
+                          );
+                          return {
+                            value: inv.id,
+                            label,
+                            keywords: buildInvoiceCopySourceKeywords(inv, label),
+                            content: (
+                              <InvoiceCopySourceOptionPreview
+                                inv={inv}
+                                headerLabel={label}
+                                localeTag={localeTag}
+                                t={t}
+                              />
+                            ),
+                          };
+                        }),
+                      ]}
+                    />
                   )}
                 </div>
                 <div className="space-y-1.5">
@@ -1626,7 +1928,41 @@ const AdminBilling = () => {
             <CardHeader className="pb-2">
               <CardTitle className="text-base">{t("admin.billing.issued_filters_title")}</CardTitle>
             </CardHeader>
-            <CardContent className="grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
+            <CardContent className="space-y-3">
+              {invoiceListIssuedYm && /^\d{4}-\d{2}$/.test(invoiceListIssuedYm) ? (
+                <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-primary/20 bg-primary/5 px-3 py-2 text-sm">
+                  <span className="text-muted-foreground">
+                    <span className="font-medium text-foreground">
+                      {formatInvoiceMonthHeading(
+                        localeTag,
+                        Number(invoiceListIssuedYm.slice(0, 4)),
+                        Number(invoiceListIssuedYm.slice(5, 7)),
+                        invoiceListIssuedYm
+                      )}
+                    </span>
+                    <span className="mx-1">·</span>
+                    {t("admin.billing.month_filter_dates_disabled_hint")}
+                  </span>
+                  <Button type="button" variant="ghost" size="sm" className="h-8 shrink-0" onClick={() => setInvoiceListIssuedYm(null)}>
+                    {t("admin.billing.month_filter_clear")}
+                  </Button>
+                </div>
+              ) : null}
+              {issuedCollectionFilter === "outstanding" ? (
+                <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-amber-500/25 bg-amber-500/10 px-3 py-2 text-sm dark:border-amber-800/40 dark:bg-amber-950/30">
+                  <span className="text-muted-foreground">{t("admin.billing.collection_filter_outstanding_banner")}</span>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="h-8 shrink-0"
+                    onClick={() => setIssuedCollectionFilter("all")}
+                  >
+                    {t("admin.billing.collection_filter_clear")}
+                  </Button>
+                </div>
+              ) : null}
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
               <div className="space-y-1.5 sm:col-span-2">
                 <Label>{t("admin.billing.search_ph")}</Label>
                 <Input
@@ -1637,51 +1973,67 @@ const AdminBilling = () => {
               </div>
               <div className="space-y-1.5">
                 <Label>{t("admin.billing.col_issuer")}</Label>
-                <Select value={issuedIssuerIdFilter} onValueChange={setIssuedIssuerIdFilter}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">{t("admin.common.filter_all")}</SelectItem>
-                    {issuers.map((i) => (
-                      <SelectItem key={i.id} value={i.id}>
-                        {i.code} · {i.legalName}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <SearchableSelect
+                  value={issuedIssuerIdFilter}
+                  onValueChange={setIssuedIssuerIdFilter}
+                  options={[
+                    { value: "all", label: t("admin.common.filter_all") },
+                    ...issuers.map((i) => ({
+                      value: i.id,
+                      label: `${i.code} · ${i.legalName}`,
+                    })),
+                  ]}
+                />
               </div>
               <div className="space-y-1.5">
                 <Label>{t("admin.billing.col_client")}</Label>
-                <Select value={issuedClientIdFilter} onValueChange={setIssuedClientIdFilter}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">{t("admin.common.filter_all")}</SelectItem>
-                    {clients.map((c) => (
-                      <SelectItem key={c.id} value={c.id}>
-                        {(c.companyName || c.tradeName || c.cif).trim()}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <SearchableSelect
+                  value={issuedClientIdFilter}
+                  onValueChange={setIssuedClientIdFilter}
+                  options={[
+                    { value: "all", label: t("admin.common.filter_all") },
+                    ...clients.map((c) => ({
+                      value: c.id,
+                      label: (c.companyName || c.tradeName || c.cif).trim(),
+                    })),
+                  ]}
+                />
               </div>
               <div className="space-y-1.5">
                 <Label>{t("admin.billing.filter_from")}</Label>
-                <Input type="date" value={issuedFromDate} onChange={(e) => setIssuedFromDate(e.target.value)} />
+                <Input
+                  type="date"
+                  value={issuedFromDate}
+                  disabled={Boolean(invoiceListIssuedYm)}
+                  title={
+                    invoiceListIssuedYm ? t("admin.billing.month_filter_dates_disabled_hint") : undefined
+                  }
+                  onChange={(e) => setIssuedFromDate(e.target.value)}
+                />
               </div>
               <div className="space-y-1.5">
                 <Label>{t("admin.billing.filter_to")}</Label>
-                <Input type="date" value={issuedToDate} onChange={(e) => setIssuedToDate(e.target.value)} />
+                <Input
+                  type="date"
+                  value={issuedToDate}
+                  disabled={Boolean(invoiceListIssuedYm)}
+                  title={
+                    invoiceListIssuedYm ? t("admin.billing.month_filter_dates_disabled_hint") : undefined
+                  }
+                  onChange={(e) => setIssuedToDate(e.target.value)}
+                />
               </div>
+            </div>
             </CardContent>
           </Card>
 
           <Card>
             <CardHeader className="pb-2 space-y-1">
               <CardTitle className="text-base">{t("admin.billing.issued_title")}</CardTitle>
-              <CardDescription>{t("admin.billing.issued_group_hint")}</CardDescription>
+              <CardDescription className="space-y-1">
+                <span>{t("admin.billing.issued_group_hint")}</span>
+                <span className="block text-[11px] text-muted-foreground">{t("admin.billing.collection_semaphore_legend")}</span>
+              </CardDescription>
             </CardHeader>
             <CardContent>
               {isLoading ? (
@@ -1690,7 +2042,15 @@ const AdminBilling = () => {
                   {t("admin.common.loading")}
                 </div>
               ) : issuedInvoicesFiltered.length === 0 ? (
-                <p className="text-sm text-muted-foreground py-4">{t("admin.billing.empty")}</p>
+                <p className="text-sm text-muted-foreground py-4">
+                  {issuedInvoices.length === 0
+                    ? t("admin.billing.empty")
+                    : invoiceListIssuedYm
+                      ? t("admin.billing.empty_month_filter_issued")
+                      : issuedCollectionFilter === "outstanding"
+                        ? t("admin.billing.empty_collection_filter_issued")
+                        : t("admin.billing.empty")}
+                </p>
               ) : (
                 <div className="space-y-3">
                   {issuedGrouped.map((ig, igIdx) => {
@@ -1752,6 +2112,9 @@ const AdminBilling = () => {
                                                   <Table>
                                                     <TableHeader>
                                                       <TableRow>
+                                                        <TableHead className="w-11 px-2 text-center">
+                                                          {t("admin.billing.col_collection")}
+                                                        </TableHead>
                                                         <TableHead>{t("admin.billing.col_invoice")}</TableHead>
                                                         <TableHead>{t("admin.billing.col_status")}</TableHead>
                                                         <TableHead>{t("admin.billing.col_client")}</TableHead>
@@ -1766,8 +2129,24 @@ const AdminBilling = () => {
                                                           inv.invoiceNumber != null && inv.fiscalYear != null
                                                             ? `${inv.seriesCode}-${inv.fiscalYear}/${String(inv.invoiceNumber).padStart(4, "0")}`
                                                             : `${inv.seriesCode}-?`;
+                                                        const semTitle = issuedCollectionSemaphoreTitle(inv, t);
+                                                        const sem = billingCollectionSemaphore(inv);
                                                         return (
                                                           <TableRow key={inv.id}>
+                                                            <TableCell className="w-11 px-2 text-center align-middle">
+                                                              <span
+                                                                role="img"
+                                                                aria-label={semTitle}
+                                                                title={semTitle}
+                                                                className={cn(
+                                                                  "inline-block size-2.5 shrink-0 rounded-full border border-black/10 dark:border-white/15",
+                                                                  sem === "full" && "bg-emerald-500",
+                                                                  sem === "partial" && "bg-amber-500",
+                                                                  sem === "none" && "bg-red-500",
+                                                                  sem === "na" && "bg-muted-foreground/35"
+                                                                )}
+                                                              />
+                                                            </TableCell>
                                                             <TableCell className="font-medium">{number}</TableCell>
                                                             <TableCell>
                                                               <Badge variant={variantByStatus(inv.status)}>{inv.status}</Badge>
@@ -1843,7 +2222,7 @@ const AdminBilling = () => {
                 <>
                   <div className="space-y-1.5">
                     <Label>{t("admin.billing.col_issuer")}</Label>
-                    <Select
+                    <SearchableSelect
                       value={draftIssuerId}
                       onValueChange={(v) => {
                         setDraftIssuerId(v);
@@ -1856,23 +2235,15 @@ const AdminBilling = () => {
                           }).then(() => qc.invalidateQueries({ queryKey: queryKeys.billingInvoices }));
                         }
                       }}
-                    >
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {issuersSelectableForDraft.map((i) => (
-                          <SelectItem key={i.id} value={i.id}>
-                            {i.code} · {i.legalName}
-                            {!i.active ? ` (${t("admin.billing.issuer_inactive_label")})` : ""}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                      options={issuersSelectableForDraft.map((i) => ({
+                        value: i.id,
+                        label: `${i.code} · ${i.legalName}${!i.active ? ` (${t("admin.billing.issuer_inactive_label")})` : ""}`,
+                      }))}
+                    />
                   </div>
                   <div className="space-y-1.5">
                     <Label>{t("admin.billing.col_series")}</Label>
-                    <Select
+                    <SearchableSelect
                       value={draftSeriesId}
                       onValueChange={(v) => {
                         setDraftSeriesId(v);
@@ -1882,19 +2253,11 @@ const AdminBilling = () => {
                           );
                         }
                       }}
-                    >
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {seriesSelectableForDraft.map((s) => (
-                          <SelectItem key={s.id} value={s.id}>
-                            {s.code} · {s.label}
-                            {!s.active ? ` (${t("admin.billing.series_status_inactive")})` : ""}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                      options={seriesSelectableForDraft.map((s) => ({
+                        value: s.id,
+                        label: `${s.code} · ${s.label}${!s.active ? ` (${t("admin.billing.series_status_inactive")})` : ""}`,
+                      }))}
+                    />
                   </div>
                 </>
               ) : (
@@ -1952,22 +2315,17 @@ const AdminBilling = () => {
                 <div className="space-y-1.5 sm:col-span-2">
                   <Label>{t("admin.billing.invoice_addressee_label")}</Label>
                   <p className="text-xs text-muted-foreground">{t("admin.billing.invoice_addressee_hint")}</p>
-                  <Select
+                  <SearchableSelect
                     value={draftRecipientAddresseeLine ? draftRecipientAddresseeLine : "__none__"}
                     onValueChange={(v) => setDraftRecipientAddresseeLine(v === "__none__" ? "" : v)}
-                  >
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="__none__">{t("admin.billing.invoice_addressee_none")}</SelectItem>
-                      {invoiceAddresseeSelectOptions.map((opt) => (
-                        <SelectItem key={opt} value={opt}>
-                          {opt.length > 96 ? `${opt.slice(0, 93)}…` : opt}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                    options={[
+                      { value: "__none__", label: t("admin.billing.invoice_addressee_none") },
+                      ...invoiceAddresseeSelectOptions.map((opt) => ({
+                        value: opt,
+                        label: opt.length > 96 ? `${opt.slice(0, 93)}…` : opt,
+                      })),
+                    ]}
+                  />
                 </div>
               ) : !editable && selectedInvoice.recipientAddresseeLine?.trim() ? (
                 <div className="space-y-1 sm:col-span-2 text-sm">
@@ -1997,7 +2355,7 @@ const AdminBilling = () => {
                   {draftLines.map((line, idx) => (
                     <TableRow key={idx}>
                       <TableCell>
-                        <Select
+                        <SearchableSelect
                           value={line.lineType}
                           disabled={!editable}
                           onValueChange={(v) =>
@@ -2025,17 +2383,14 @@ const AdminBilling = () => {
                               )
                             )
                           }
-                        >
-                          <SelectTrigger>
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="BILLABLE">{t("admin.billing.line_type_billable")}</SelectItem>
-                            <SelectItem value="BLOCK_TITLE">{t("admin.billing.line_type_block_title")}</SelectItem>
-                            <SelectItem value="BLOCK_SUBTITLE">{t("admin.billing.line_type_block_subtitle")}</SelectItem>
-                            <SelectItem value="CONCEPT">{t("admin.billing.line_type_concept")}</SelectItem>
-                          </SelectContent>
-                        </Select>
+                          options={[
+                            { value: "BILLABLE", label: t("admin.billing.line_type_billable") },
+                            { value: "BLOCK_TITLE", label: t("admin.billing.line_type_block_title") },
+                            { value: "BLOCK_SUBTITLE", label: t("admin.billing.line_type_block_subtitle") },
+                            { value: "CONCEPT", label: t("admin.billing.line_type_concept") },
+                          ]}
+                          searchable={false}
+                        />
                       </TableCell>
                       <TableCell>
                         <Textarea
@@ -2113,7 +2468,7 @@ const AdminBilling = () => {
                         />
                       </TableCell>
                       <TableCell>
-                        <Select
+                        <SearchableSelect
                           value={String(line.vatRate)}
                           onValueChange={(v) =>
                             setDraftLines((prev) =>
@@ -2121,16 +2476,13 @@ const AdminBilling = () => {
                             )
                           }
                           disabled={!editable || line.lineType !== "BILLABLE"}
-                        >
-                          <SelectTrigger>
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="21">21</SelectItem>
-                            <SelectItem value="10">10</SelectItem>
-                            <SelectItem value="4">4</SelectItem>
-                          </SelectContent>
-                        </Select>
+                          options={[
+                            { value: "21", label: "21" },
+                            { value: "10", label: "10" },
+                            { value: "4", label: "4" },
+                          ]}
+                          searchable={false}
+                        />
                       </TableCell>
                       <TableCell>
                         <Input
@@ -2185,6 +2537,54 @@ const AdminBilling = () => {
                             <span>{t("admin.billing.draft_totals_grand")}</span>
                             <span className="min-w-[7.5rem]">
                               {draftBillableTotalsPreview.grandTotal.toLocaleString(localeTag, {
+                                style: "currency",
+                                currency: "EUR",
+                              })}
+                            </span>
+                          </div>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  </TableFooter>
+                ) : selectedInvoice ? (
+                  <TableFooter>
+                    <TableRow className="bg-muted/40 border-t-2 border-border">
+                      <TableCell colSpan={2} className="text-muted-foreground align-top py-3 text-sm font-medium">
+                        {t("admin.billing.invoice_issued_totals_title")}
+                      </TableCell>
+                      <TableCell colSpan={5} className="text-right align-top py-3">
+                        <div className="inline-flex flex-col gap-1 text-sm tabular-nums sm:min-w-[16rem]">
+                          <div className="flex justify-end gap-6">
+                            <span className="text-muted-foreground font-normal">{t("admin.billing.draft_totals_base")}</span>
+                            <span className="min-w-[7.5rem]">
+                              {selectedInvoice.taxableBaseTotal.toLocaleString(localeTag, {
+                                style: "currency",
+                                currency: "EUR",
+                              })}
+                            </span>
+                          </div>
+                          <div className="flex justify-end gap-6">
+                            <span className="text-muted-foreground font-normal">{t("admin.billing.draft_totals_vat")}</span>
+                            <span className="min-w-[7.5rem]">
+                              {selectedInvoice.vatTotal.toLocaleString(localeTag, {
+                                style: "currency",
+                                currency: "EUR",
+                              })}
+                            </span>
+                          </div>
+                          <div className="flex justify-end gap-6">
+                            <span className="text-muted-foreground font-normal">{t("admin.billing.draft_totals_irpf")}</span>
+                            <span className="min-w-[7.5rem]">
+                              {selectedInvoice.irpfTotal.toLocaleString(localeTag, {
+                                style: "currency",
+                                currency: "EUR",
+                              })}
+                            </span>
+                          </div>
+                          <div className="flex justify-end gap-6 border-t border-border/80 pt-1 mt-0.5 font-semibold text-foreground">
+                            <span>{t("admin.billing.draft_totals_grand")}</span>
+                            <span className="min-w-[7.5rem]">
+                              {selectedInvoice.grandTotal.toLocaleString(localeTag, {
                                 style: "currency",
                                 currency: "EUR",
                               })}
@@ -2266,11 +2666,7 @@ const AdminBilling = () => {
                     type="button"
                     variant="outline"
                     className="text-destructive border-destructive/40 hover:bg-destructive/10"
-                    onClick={() => {
-                      if (!selectedInvoice) return;
-                      if (!window.confirm(t("admin.billing.delete_draft_confirm"))) return;
-                      deleteDraftMutation.mutate(selectedInvoice.id);
-                    }}
+                    onClick={() => selectedInvoice && setDeleteDraftConfirmId(selectedInvoice.id)}
                     disabled={deleteDraftMutation.isPending || !selectedInvoice}
                   >
                     {deleteDraftMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Trash2 className="h-4 w-4 mr-2" />}
@@ -2316,7 +2712,13 @@ const AdminBilling = () => {
                       type="button"
                       variant="outline"
                       onClick={() => rectificativeMutation.mutate()}
-                      disabled={rectificativeMutation.isPending || !rectificativeSeriesId || seriesForRectificative.length === 0}
+                      disabled={
+                        rectificativeMutation.isPending ||
+                        !rectificativeSeriesId ||
+                        seriesForRectificative.length === 0 ||
+                        selectedInvoice.status === "CANCELLED" ||
+                        !rectificativeReason.trim()
+                      }
                     >
                       {rectificativeMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Receipt className="h-4 w-4 mr-2" />}
                       {t("admin.billing.action_rectificative")}
@@ -2327,57 +2729,181 @@ const AdminBilling = () => {
                         {t("admin.billing.action_cancel")}
                       </Button>
                     ) : null}
-                    <Button type="button" variant="destructive" onClick={() => deleteMutation.mutate()} disabled={deleteMutation.isPending}>
+                    <Button type="button" variant="destructive" onClick={() => setDeleteTestInvoiceOpen(true)} disabled={deleteMutation.isPending}>
                       {deleteMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Ban className="h-4 w-4 mr-2" />}
                       {t("admin.billing.action_delete_test_mode")}
                     </Button>
                   </div>
                   <div className="space-y-1.5 max-w-md">
                     <Label className="text-xs">{t("admin.billing.rectificative_series")}</Label>
-                    <Select value={rectificativeSeriesId} onValueChange={setRectificativeSeriesId}>
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {seriesForRectificative.map((s) => (
-                          <SelectItem key={s.id} value={s.id}>
-                            {s.code} · {s.label}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                    <SearchableSelect
+                      value={rectificativeSeriesId}
+                      onValueChange={setRectificativeSeriesId}
+                      options={seriesForRectificative.map((s) => ({
+                        value: s.id,
+                        label: `${s.code} · ${s.label}`,
+                      }))}
+                    />
+                  </div>
+                  <div className="space-y-1.5 max-w-xl">
+                    <Label className="text-xs">{t("admin.billing.rectificative_reason_label")}</Label>
+                    <p className="text-xs text-muted-foreground">{t("admin.billing.rectificative_reason_hint")}</p>
+                    <Textarea
+                      rows={3}
+                      value={rectificativeReason}
+                      onChange={(e) => setRectificativeReason(e.target.value)}
+                      placeholder={t("admin.billing.rectificative_reason_placeholder")}
+                      className="text-sm resize-y min-h-[4.5rem]"
+                    />
                   </div>
                 </div>
               )}
             </div>
 
             {selectedInvoice.status !== "DRAFT" && selectedInvoice.status !== "CANCELLED" ? (
-              <div className="rounded-md border p-3 space-y-2">
+              <div className="rounded-md border p-3 space-y-3">
                 <p className="text-sm font-medium">{t("admin.billing.receipts_title")}</p>
-                <div className="grid gap-2 sm:grid-cols-4">
-                  <Input type="date" value={receiptDate} onChange={(e) => setReceiptDate(e.target.value)} />
-                  <Input
-                    placeholder={t("admin.billing.receipt_amount_ph")}
-                    value={receiptAmount}
-                    onChange={(e) => setReceiptAmount(e.target.value)}
-                  />
-                  <Input value={receiptMethod} onChange={(e) => setReceiptMethod(e.target.value)} />
-                  <Input
-                    placeholder={t("admin.billing.receipt_reference_ph")}
-                    value={receiptReference}
-                    onChange={(e) => setReceiptReference(e.target.value)}
-                  />
-                </div>
-                <Button type="button" variant="outline" onClick={() => receiptMutation.mutate()} disabled={receiptMutation.isPending || !receiptAmount}>
-                  {receiptMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Receipt className="h-4 w-4 mr-2" />}
-                  {t("admin.billing.action_add_receipt")}
-                </Button>
+                {issuedReceiptRemainingEuro != null ? (
+                  <div className="flex flex-col gap-1 text-xs text-muted-foreground sm:flex-row sm:flex-wrap sm:gap-x-5">
+                    <span>
+                      {t("admin.billing.receipt_summary_invoice_total")}:{" "}
+                      <span className="font-medium tabular-nums text-foreground">
+                        {selectedInvoice.grandTotal.toLocaleString(localeTag, {
+                          style: "currency",
+                          currency: "EUR",
+                        })}
+                      </span>
+                    </span>
+                    <span>
+                      {t("admin.billing.receipt_summary_collected")}:{" "}
+                      <span className="font-medium tabular-nums text-foreground">
+                        {selectedInvoice.collectedTotal.toLocaleString(localeTag, {
+                          style: "currency",
+                          currency: "EUR",
+                        })}
+                      </span>
+                    </span>
+                    <span>
+                      {t("admin.billing.receipt_summary_pending")}:{" "}
+                      <span className="font-medium tabular-nums text-foreground">
+                        {issuedReceiptRemainingEuro.toLocaleString(localeTag, {
+                          style: "currency",
+                          currency: "EUR",
+                        })}
+                      </span>
+                    </span>
+                  </div>
+                ) : null}
+                {issuedReceiptRemainingEuro != null && issuedReceiptRemainingEuro <= BILLING_COLLECTION_EPS ? (
+                  <p className="text-xs text-muted-foreground">{t("admin.billing.receipt_fully_paid_hint")}</p>
+                ) : (
+                  <>
+                    <div className="space-y-2">
+                      <Label className="text-xs">{t("admin.billing.receipt_amount_mode_label")}</Label>
+                      <RadioGroup
+                        value={receiptAmountMode}
+                        onValueChange={(v) => {
+                          const mode = v as "partial" | "full";
+                          setReceiptAmountMode(mode);
+                          if (mode === "partial") setReceiptAmount("");
+                        }}
+                        className="flex flex-col gap-2 sm:flex-row sm:gap-8"
+                      >
+                        <div className="flex items-center gap-2">
+                          <RadioGroupItem value="partial" id="receipt-mode-partial" />
+                          <Label htmlFor="receipt-mode-partial" className="cursor-pointer font-normal">
+                            {t("admin.billing.receipt_mode_partial")}
+                          </Label>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <RadioGroupItem value="full" id="receipt-mode-full" />
+                          <Label htmlFor="receipt-mode-full" className="cursor-pointer font-normal">
+                            {t("admin.billing.receipt_mode_full")}
+                          </Label>
+                        </div>
+                      </RadioGroup>
+                    </div>
+                    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                      <div className="space-y-1">
+                        <Label className="text-xs">{t("admin.billing.receipt_date_label")}</Label>
+                        <Input type="date" value={receiptDate} onChange={(e) => setReceiptDate(e.target.value)} />
+                      </div>
+                      <div className="space-y-1">
+                        <Label className="text-xs">{t("admin.billing.receipt_amount_label")}</Label>
+                        <Input
+                          placeholder={t("admin.billing.receipt_amount_partial_ph")}
+                          value={receiptAmount}
+                          onChange={(e) => setReceiptAmount(e.target.value)}
+                          disabled={receiptAmountMode === "full"}
+                          readOnly={receiptAmountMode === "full"}
+                          className={cn(receiptAmountMode === "full" && "bg-muted")}
+                        />
+                        {receiptAmountMode === "partial" && issuedReceiptRemainingEuro != null ? (
+                          <p className="text-[11px] text-muted-foreground">
+                            {t("admin.billing.receipt_amount_max_hint").replace(
+                              "{{max}}",
+                              issuedReceiptRemainingEuro.toLocaleString(localeTag, {
+                                minimumFractionDigits: 2,
+                                maximumFractionDigits: 2,
+                              })
+                            )}
+                          </p>
+                        ) : null}
+                      </div>
+                      <div className="space-y-1">
+                        <Label className="text-xs">{t("admin.billing.receipt_method_label")}</Label>
+                        <Input value={receiptMethod} onChange={(e) => setReceiptMethod(e.target.value)} />
+                      </div>
+                      <div className="space-y-1">
+                        <Label className="text-xs">{t("admin.billing.receipt_reference_label")}</Label>
+                        <Input
+                          placeholder={t("admin.billing.receipt_reference_ph")}
+                          value={receiptReference}
+                          onChange={(e) => setReceiptReference(e.target.value)}
+                        />
+                      </div>
+                    </div>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => receiptMutation.mutate()}
+                      disabled={receiptMutation.isPending || !receiptCanSubmit}
+                    >
+                      {receiptMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Receipt className="h-4 w-4 mr-2" />}
+                      {t("admin.billing.action_add_receipt")}
+                    </Button>
+                  </>
+                )}
               </div>
             ) : null}
           </CardContent>
         </Card>
       ) : null}
     </div>
+
+      <DoubleConfirmAlertDialog
+        open={!!deleteDraftConfirmId}
+        onOpenChange={(o) => {
+          if (!o) setDeleteDraftConfirmId(null);
+        }}
+        onConfirm={() => {
+          if (deleteDraftConfirmId) deleteDraftMutation.mutate(deleteDraftConfirmId);
+        }}
+        title={t("admin.billing.action_delete_draft")}
+        description={t("admin.billing.delete_draft_confirm")}
+        disabled={deleteDraftMutation.isPending}
+      />
+
+      <DoubleConfirmAlertDialog
+        open={deleteTestInvoiceOpen}
+        onOpenChange={(o) => {
+          if (!o) setDeleteTestInvoiceOpen(false);
+        }}
+        onConfirm={() => deleteMutation.mutate()}
+        title={t("admin.billing.action_delete_test_mode")}
+        description={t("admin.billing.delete_confirm_test_mode")}
+        disabled={deleteMutation.isPending}
+      />
     </>
   );
 };

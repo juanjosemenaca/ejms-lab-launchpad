@@ -12,7 +12,6 @@ import {
   Truck,
   Contact2,
   Menu,
-  X,
   IdCard,
   Inbox,
   MessageSquare,
@@ -26,10 +25,14 @@ import {
   NotebookPen,
   Database,
   Euro,
+  ClipboardList,
+  Archive,
+  FileSpreadsheet,
   Globe,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Separator } from "@/components/ui/separator";
 import { useAdminAuth } from "@/contexts/AdminAuthContext";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
@@ -44,8 +47,11 @@ import {
 import { usePendingWorkerVacationChangeRequests } from "@/hooks/useWorkerVacationChangeRequests";
 import { usePendingWorkerExpenseSheets } from "@/hooks/useWorkerExpenseSheets";
 import { useMyUnreadBackofficeMessageCount } from "@/hooks/useBackofficeMessages";
+import { useMyDmsDocumentReviewsAsAssignee } from "@/hooks/useMyDmsDocumentReviews";
 import { ADMIN_PATHS } from "@/constants/adminPaths";
 import { IntranetAttentionDialogs } from "@/components/admin/IntranetAttentionDialogs";
+import { runProjectEndNotices } from "@/api/projectsApi";
+import { isRegistryWorkerModule } from "@/types/backoffice";
 
 const NAV_KEYS = [
   { to: "/admin", labelKey: "admin.layout.nav_panel", icon: LayoutDashboard, roles: ["ADMIN", "WORKER"] as const },
@@ -83,24 +89,24 @@ const NAV_KEYS = [
     labelKey: "admin.layout.nav_billing",
     icon: FileText,
     roles: ["WORKER", "ADMIN"] as const,
+    requiredModule: "FACTURACION" as const,
   },
   {
     to: "/admin/mensajes",
     labelKey: "admin.layout.nav_messages",
     icon: Inbox,
     roles: ["WORKER", "ADMIN"] as const,
-    requiredModule: "MESSAGES" as const,
+  },
+  {
+    to: "/admin/documentos-pendientes",
+    labelKey: "admin.layout.nav_assigned_documents",
+    icon: ClipboardList,
+    roles: ["WORKER"] as const,
   },
   {
     to: "/admin/mensajes-trabajadores",
     labelKey: "admin.layout.nav_worker_messages_admin",
     icon: MessageSquare,
-    roles: ["ADMIN"] as const,
-  },
-  {
-    to: ADMIN_PATHS.mensajesFormularioWeb,
-    labelKey: "admin.layout.nav_web_form_messages",
-    icon: Globe,
     roles: ["ADMIN"] as const,
   },
   {
@@ -139,6 +145,12 @@ const NAV_KEYS = [
     icon: Inbox,
     roles: ["ADMIN"] as const,
   },
+  {
+    to: ADMIN_PATHS.mensajesFormularioWeb,
+    labelKey: "admin.layout.nav_web_form_messages",
+    icon: Globe,
+    roles: ["ADMIN"] as const,
+  },
   { to: "/admin/usuarios", labelKey: "admin.layout.nav_users_list", icon: Users, roles: ["ADMIN"] as const },
   {
     to: "/admin/usuarios/alta-masiva",
@@ -152,18 +164,78 @@ const NAV_KEYS = [
     icon: Layers,
     roles: ["ADMIN"] as const,
   },
-  { to: "/admin/trabajadores", labelKey: "admin.layout.nav_workers", icon: Contact2, roles: ["ADMIN"] as const },
-  { to: "/admin/proveedores", labelKey: "admin.layout.nav_providers", icon: Truck, roles: ["ADMIN"] as const },
-  { to: "/admin/clientes", labelKey: "admin.layout.nav_clients", icon: Building2, roles: ["ADMIN"] as const },
-  { to: "/admin/proyectos", labelKey: "admin.layout.nav_projects", icon: FolderKanban, roles: ["ADMIN"] as const },
+  { to: "/admin/trabajadores", labelKey: "admin.layout.nav_workers", icon: Contact2, roles: ["ADMIN", "WORKER"] as const, requiredModule: "ADMIN_COMPANY_WORKERS" as const },
+  { to: "/admin/proveedores", labelKey: "admin.layout.nav_providers", icon: Truck, roles: ["ADMIN", "WORKER"] as const, requiredModule: "ADMIN_PROVIDERS" as const },
+  { to: "/admin/clientes", labelKey: "admin.layout.nav_clients", icon: Building2, roles: ["ADMIN", "WORKER"] as const, requiredModule: "ADMIN_CLIENTS" as const },
+  { to: "/admin/proyectos", labelKey: "admin.layout.nav_projects", icon: FolderKanban, roles: ["ADMIN", "WORKER"] as const, requiredModule: "ADMIN_PROJECTS" as const },
+  { to: "/admin/documentos", labelKey: "admin.layout.nav_dms", icon: Archive, roles: ["ADMIN", "WORKER"] as const, requiredModule: "DMS" as const },
   { to: "/admin/calendarios-laborales", labelKey: "admin.layout.nav_calendars", icon: CalendarDays, roles: ["ADMIN"] as const },
+  {
+    to: "/admin/generador-facturas-masivas",
+    labelKey: "admin.layout.nav_bulk_invoices",
+    icon: FileSpreadsheet,
+    roles: ["ADMIN"] as const,
+  },
 ] as const;
+
+/** Orden del lateral para trabajadores: bloque personal → separador → módulos activables (operativos). */
+type WorkerSidebarSegment = { kind: "link"; path: string } | { kind: "time_clock" };
+
+const WORKER_SIDEBAR_PERSONAL_SEGMENTS: WorkerSidebarSegment[] = [
+  { kind: "link", path: "/admin" },
+  { kind: "link", path: "/admin/mi-ficha" },
+  { kind: "link", path: "/admin/mi-calendario" },
+  { kind: "time_clock" },
+  { kind: "link", path: "/admin/mi-agenda" },
+  { kind: "link", path: "/admin/mis-gastos" },
+  { kind: "link", path: "/admin/mensajes" },
+  { kind: "link", path: "/admin/documentos-pendientes" },
+];
+
+const WORKER_SIDEBAR_OPERATIONAL_PATHS: readonly string[] = [
+  "/admin/facturacion",
+  "/admin/documentos",
+  "/admin/trabajadores",
+  "/admin/clientes",
+  "/admin/proyectos",
+  "/admin/proveedores",
+];
+
+/** Orden del menú principal (lado oscuro) para administradores; tras el separador va el bloque personal «DATA». */
+type AdminMainNavSegment =
+  | { kind: "panel" }
+  | { kind: "messages_hub" }
+  | { kind: "users_submenu" }
+  | { kind: "link"; path: string }
+  | { kind: "time_clock_hub" }
+  | { kind: "dms" }
+  | { kind: "bulk_invoices" }
+  /** Solo EJMS Lab: no forma parte del hub «Mensajes» en Inorme; va al final del bloque principal. */
+  | { kind: "web_form_messages" };
+
+const ADMIN_MAIN_NAV_SEGMENTS: AdminMainNavSegment[] = [
+  { kind: "panel" },
+  { kind: "messages_hub" },
+  { kind: "users_submenu" },
+  { kind: "link", path: "/admin/trabajadores" },
+  { kind: "link", path: "/admin/proveedores" },
+  { kind: "link", path: "/admin/clientes" },
+  { kind: "link", path: "/admin/proyectos" },
+  { kind: "link", path: "/admin/vacaciones" },
+  { kind: "link", path: "/admin/calendarios-laborales" },
+  { kind: "link", path: "/admin/facturacion" },
+  { kind: "link", path: ADMIN_PATHS.gastosTrabajadores },
+  { kind: "link", path: "/admin/agendas-trabajadores" },
+  { kind: "time_clock_hub" },
+  { kind: "dms" },
+  { kind: "bulk_invoices" },
+  { kind: "web_form_messages" },
+];
 
 const ADMIN_MESSAGE_CHILD_ROUTES = [
   ADMIN_PATHS.solicitudesVacaciones,
   ADMIN_PATHS.solicitudesFicha,
   ADMIN_PATHS.mensajesTrabajadores,
-  ADMIN_PATHS.mensajesFormularioWeb,
   ADMIN_PATHS.solicitudesFichajes,
 ] as const;
 
@@ -179,7 +251,6 @@ const ADMIN_SELF_SERVICE_PATHS = [
   "/admin/mi-calendario",
   "/admin/mi-agenda",
   "/admin/mis-gastos",
-  "/admin/facturacion",
   "/admin/mensajes",
 ] as const;
 /** Submenú solo bajo «Fichajes» (no van en NAV_KEYS para no duplicar enlaces de primer nivel). */
@@ -214,11 +285,12 @@ const AdminLayout = () => {
     userRole === "WORKER" || userRole === "ADMIN" ? user?.companyWorkerId ?? null : null
   );
   const { data: unreadMessageCount = 0 } = useMyUnreadBackofficeMessageCount(
-    supabaseOk &&
-      !!user &&
-      (userRole === "WORKER" || userRole === "ADMIN") &&
-      enabledModules.includes("MESSAGES")
+    supabaseOk && !!user && (userRole === "WORKER" || userRole === "ADMIN")
   );
+  const { data: myPendingDmsReviews = [] } = useMyDmsDocumentReviewsAsAssignee(
+    supabaseOk && userRole === "WORKER" && !!user
+  );
+  const pendingAssignedDocsCount = myPendingDmsReviews.length;
   const { data: pendingVacationRequests = [] } = usePendingWorkerVacationChangeRequests(
     isAdmin && supabaseOk && !!user
   );
@@ -232,6 +304,9 @@ const AdminLayout = () => {
   const navItems = NAV_KEYS.filter((item) => {
     if (userRole === null || !item.roles.includes(userRole)) return false;
     if ("requiredModule" in item && item.requiredModule) {
+      if (userRole === "ADMIN" && item.requiredModule === "DMS") return true;
+      if (userRole === "ADMIN" && item.requiredModule === "FACTURACION") return true;
+      if (userRole === "ADMIN" && isRegistryWorkerModule(item.requiredModule)) return true;
       return enabledModules.includes(item.requiredModule);
     }
     return true;
@@ -258,6 +333,19 @@ const AdminLayout = () => {
     if (isAdminDataSectionActive) setAdminDataSectionOpen(true);
   }, [isAdminDataSectionActive]);
 
+  /** Avisos de fin de proyecto (RPC diaria, una vez por navegador y día). */
+  useEffect(() => {
+    if (!supabaseOk || !user) return;
+    const key = "projectEndNoticesLastRunYmd";
+    const today = new Date().toISOString().slice(0, 10);
+    if (localStorage.getItem(key) === today) return;
+    void runProjectEndNotices()
+      .then(() => localStorage.setItem(key, today))
+      .catch(() => {
+        /* migración o RPC aún no aplicado */
+      });
+  }, [supabaseOk, user]);
+
   const isAdminDataFichajeSectionActive =
     isAdmin && location.pathname.startsWith("/admin/fichajes");
   const [adminDataFichajeOpen, setAdminDataFichajeOpen] = useState(isAdminDataFichajeSectionActive);
@@ -281,6 +369,12 @@ const AdminLayout = () => {
       !TIME_CLOCK_SECTION_ROUTES.includes(item.to as (typeof TIME_CLOCK_SECTION_ROUTES)[number]) &&
       !(isAdmin && (ADMIN_SELF_SERVICE_PATHS as readonly string[]).includes(item.to))
   );
+  const adminSidebarPanelItem = isAdmin
+    ? (navItemsWithoutAdminMessages.find((i) => i.to === "/admin") ?? null)
+    : null;
+  const adminSidebarDmsItem = isAdmin
+    ? (navItemsWithoutAdminMessages.find((i) => i.to === "/admin/documentos") ?? null)
+    : null;
   const isAdminMessagesSectionActive = ADMIN_MESSAGE_CHILD_ROUTES.some(
     (path) => location.pathname === path || location.pathname.startsWith(`${path}/`)
   );
@@ -318,6 +412,7 @@ const AdminLayout = () => {
     if (to === ADMIN_PATHS.gastosTrabajadores && userRole === "ADMIN") return pendingExpenseSheetCount > 0;
     if (to === "/admin/mensajes" && (userRole === "WORKER" || userRole === "ADMIN"))
       return unreadMessageCount > 0;
+    if (to === "/admin/documentos-pendientes" && userRole === "WORKER") return pendingAssignedDocsCount > 0;
     if (to === "/admin/mi-ficha" && (userRole === "WORKER" || userRole === "ADMIN"))
       return workerHasPendingProfileRequest;
     return false;
@@ -356,28 +451,32 @@ const AdminLayout = () => {
     mobile = false,
     vacationNotifyCount: vacCount = 0,
     expensePendingCount = 0,
+    assignedDocsPendingCount = 0,
   }: {
     mobile?: boolean;
     vacationNotifyCount?: number;
     expensePendingCount?: number;
+    assignedDocsPendingCount?: number;
   }) => {
-    /** Menú móvil admin: fondo claro; enlaces legibles (el lateral escritorio sigue oscuro). */
-    const flyoutLight = Boolean(mobile && isAdmin);
-    return (
-    <>
-      {navItemsWithoutAdminMessages.map((item) => {
-        const active = isNavActive(item.to);
-        const attention = navNeedsAttention(item.to);
-        const pendingLabel =
-          item.to === ADMIN_PATHS.solicitudesFicha && pendingAdminProfileCount > 0
-            ? t("admin.layout.nav_pending_profile_requests_aria").replace(
-                "{{count}}",
-                String(pendingAdminProfileCount)
-              )
-            : attention && item.to === "/admin/mi-ficha"
-              ? t("admin.layout.nav_my_profile_pending_aria")
-              : attention && item.to === "/admin/mensajes"
-                ? t("admin.layout.nav_messages_pending_aria").replace("{{count}}", String(unreadMessageCount))
+    type NavItem = (typeof navItems)[number];
+    const renderTopNavItem = (item: NavItem) => {
+      const active = isNavActive(item.to);
+      const attention = navNeedsAttention(item.to);
+      const pendingLabel =
+        item.to === ADMIN_PATHS.solicitudesFicha && pendingAdminProfileCount > 0
+          ? t("admin.layout.nav_pending_profile_requests_aria").replace(
+              "{{count}}",
+              String(pendingAdminProfileCount)
+            )
+          : attention && item.to === "/admin/mi-ficha"
+            ? t("admin.layout.nav_my_profile_pending_aria")
+            : attention && item.to === "/admin/mensajes"
+              ? t("admin.layout.nav_messages_pending_aria").replace("{{count}}", String(unreadMessageCount))
+              : attention && item.to === "/admin/documentos-pendientes"
+                ? t("admin.layout.nav_assigned_documents_pending_aria").replace(
+                    "{{count}}",
+                    String(assignedDocsPendingCount)
+                  )
                 : attention && item.to === ADMIN_PATHS.solicitudesVacaciones && vacCount > 0
                   ? t("admin.layout.nav_vacation_requests_pending_aria").replace("{{count}}", String(vacCount))
                   : attention && item.to === ADMIN_PATHS.gastosTrabajadores && expensePendingCount > 0
@@ -386,223 +485,160 @@ const AdminLayout = () => {
                         String(expensePendingCount)
                       )
                     : undefined;
-        return (
-          <Fragment key={item.to}>
-            <Link
-              to={item.to}
-              onClick={() => mobile && setMobileNavOpen(false)}
-              aria-label={pendingLabel}
-              title={pendingLabel}
+      return (
+        <Link
+          to={item.to}
+          onClick={() => mobile && setMobileNavOpen(false)}
+          aria-label={pendingLabel}
+          title={pendingLabel}
+          className={cn(
+            "flex items-center justify-between gap-2 rounded-lg px-3 py-2.5 text-sm transition-colors w-full",
+            active ? "font-bold" : attention ? "font-semibold" : "font-medium",
+            isAdmin
+              ? active
+                ? attention
+                  ? "bg-red-950/50 text-red-400 border-l-2 border-red-500 -ml-px pl-[11px]"
+                  : "bg-primary/20 text-primary border-l-2 border-primary -ml-px pl-[11px] font-bold"
+                : attention
+                  ? "text-red-400 border-l-2 border-transparent hover:bg-slate-800 hover:text-red-300"
+                  : "text-slate-300 hover:bg-slate-800 hover:text-white border-l-2 border-transparent"
+              : active
+                ? attention
+                  ? "bg-red-100 dark:bg-red-950/40 text-red-700 dark:text-red-400 font-bold"
+                  : "bg-secondary text-secondary-foreground font-bold"
+                : attention
+                  ? "text-red-600 dark:text-red-400 font-bold hover:bg-muted hover:text-red-700 dark:hover:text-red-300"
+                  : "text-muted-foreground hover:bg-muted hover:text-foreground"
+          )}
+        >
+          <span className="flex items-center gap-3 min-w-0">
+            <item.icon
               className={cn(
-                "flex items-center justify-between gap-2 rounded-lg px-3 py-2.5 text-sm transition-colors w-full",
-                active ? "font-bold" : attention ? "font-semibold" : "font-medium",
-                isAdmin
-                  ? active
-                    ? attention
-                      ? flyoutLight
-                        ? "bg-red-100 text-red-800 border-l-2 border-red-500 -ml-px pl-[11px]"
-                        : "bg-red-950/50 text-red-400 border-l-2 border-red-500 -ml-px pl-[11px]"
-                      : "bg-primary/20 text-primary border-l-2 border-primary -ml-px pl-[11px] font-bold"
-                    : attention
-                      ? flyoutLight
-                        ? "text-red-600 border-l-2 border-transparent hover:bg-red-50 hover:text-red-800"
-                        : "text-red-400 border-l-2 border-transparent hover:bg-slate-800 hover:text-red-300"
-                      : flyoutLight
-                        ? "text-muted-foreground hover:bg-muted hover:text-foreground border-l-2 border-transparent"
-                        : "text-slate-300 hover:bg-slate-800 hover:text-white border-l-2 border-transparent"
-                  : active
-                    ? attention
-                      ? "bg-red-100 dark:bg-red-950/40 text-red-700 dark:text-red-400 font-bold"
-                      : "bg-secondary text-secondary-foreground font-bold"
-                    : attention
-                      ? "text-red-600 dark:text-red-400 font-bold hover:bg-muted hover:text-red-700 dark:hover:text-red-300"
-                      : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                "h-4 w-4 shrink-0 opacity-90",
+                attention && isAdmin && "text-red-400 opacity-100",
+                attention && !isAdmin && "text-red-600 dark:text-red-400 opacity-100"
               )}
+            />
+            <span className="truncate">{t(item.labelKey)}</span>
+          </span>
+          {item.to === ADMIN_PATHS.solicitudesVacaciones && vacCount > 0 ? (
+            <Badge
+              variant="secondary"
+              className="shrink-0 h-5 min-w-[1.25rem] px-1.5 text-[10px] font-semibold tabular-nums bg-primary/25 text-primary border-0"
             >
-              <span className="flex items-center gap-3 min-w-0">
-                <item.icon
+              {vacCount > 99 ? "99+" : vacCount}
+            </Badge>
+          ) : item.to === ADMIN_PATHS.gastosTrabajadores && expensePendingCount > 0 ? (
+            <Badge
+              variant="secondary"
+              className="shrink-0 h-5 min-w-[1.25rem] px-1.5 text-[10px] font-semibold tabular-nums bg-primary/25 text-primary border-0"
+            >
+              {expensePendingCount > 99 ? "99+" : expensePendingCount}
+            </Badge>
+          ) : item.to === "/admin/documentos-pendientes" && assignedDocsPendingCount > 0 ? (
+            <Badge
+              variant="secondary"
+              className="shrink-0 h-5 min-w-[1.25rem] px-1.5 text-[10px] font-semibold tabular-nums bg-primary/25 text-primary border-0"
+            >
+              {assignedDocsPendingCount > 99 ? "99+" : assignedDocsPendingCount}
+            </Badge>
+          ) : null}
+        </Link>
+      );
+    };
+
+    const adminPersonalSubmenu = showAdminDataNav ? (
+      <div className="space-y-1">
+        <button
+          type="button"
+          onClick={() => setAdminDataSectionOpen((v) => !v)}
+          aria-expanded={adminDataSectionOpen}
+          aria-controls="admin-data-submenu"
+          id="admin-data-menu-button"
+          className={cn(
+            "flex w-full items-center justify-between gap-2 rounded-lg border-l-2 px-3 py-2.5 text-sm transition-colors",
+            isAdminDataSectionActive
+              ? "-ml-px border-primary bg-primary/20 pl-[11px] font-bold text-primary"
+              : "border-transparent font-medium text-slate-300 hover:bg-slate-800 hover:text-white"
+          )}
+        >
+          <span className="flex min-w-0 items-center gap-3">
+            <Database className="h-4 w-4 shrink-0 opacity-90" aria-hidden />
+            {user ? <AdminDataNavHeading user={user} /> : <span className="truncate">— DATA</span>}
+          </span>
+          <ChevronDown
+            className={cn("h-4 w-4 shrink-0 transition-transform", adminDataSectionOpen && "rotate-180")}
+            aria-hidden
+          />
+        </button>
+        {adminDataSectionOpen ? (
+          <div
+            id="admin-data-submenu"
+            role="region"
+            aria-labelledby="admin-data-menu-button"
+            className="space-y-1 pl-8"
+          >
+            {adminSelfServiceItems.map((subItem) => {
+              const subActive = isNavActive(subItem.to);
+              const subAttention = navNeedsAttention(subItem.to);
+              const SubIcon = subItem.icon;
+              return (
+                <Link
+                  key={subItem.to}
+                  to={subItem.to}
+                  onClick={() => mobile && setMobileNavOpen(false)}
                   className={cn(
-                    "h-4 w-4 shrink-0 opacity-90",
-                    attention && isAdmin && (flyoutLight ? "text-red-600 opacity-100" : "text-red-400 opacity-100"),
-                    attention && !isAdmin && "text-red-600 dark:text-red-400 opacity-100"
+                    "flex items-center justify-between gap-2 rounded-lg px-3 py-2 text-sm transition-colors w-full",
+                    subActive
+                      ? "bg-primary/20 font-bold text-primary"
+                      : subAttention
+                        ? "font-semibold text-red-400 hover:bg-slate-800"
+                        : "text-slate-300 hover:bg-slate-800 hover:text-white"
                   )}
-                />
-                <span className="truncate">{t(item.labelKey)}</span>
-              </span>
-              {item.to === ADMIN_PATHS.solicitudesVacaciones && vacCount > 0 ? (
-                <Badge
-                  variant="secondary"
-                  className="shrink-0 h-5 min-w-[1.25rem] px-1.5 text-[10px] font-semibold tabular-nums bg-primary/25 text-primary border-0"
                 >
-                  {vacCount > 99 ? "99+" : vacCount}
-                </Badge>
-              ) : item.to === ADMIN_PATHS.gastosTrabajadores && expensePendingCount > 0 ? (
-                <Badge
-                  variant="secondary"
-                  className="shrink-0 h-5 min-w-[1.25rem] px-1.5 text-[10px] font-semibold tabular-nums bg-primary/25 text-primary border-0"
-                >
-                  {expensePendingCount > 99 ? "99+" : expensePendingCount}
-                </Badge>
-              ) : null}
-            </Link>
-            {/* Tras «Vacaciones» (resumen admin): «solicitudes-vacaciones» no está en esta lista (va al hub Mensajes). */}
-            {item.to === "/admin/vacaciones" && showAdminDataNav ? (
-              <div className="space-y-1">
+                  <span className="flex min-w-0 items-center gap-2">
+                    <SubIcon className="h-4 w-4 shrink-0 opacity-90" aria-hidden />
+                    <span className="truncate">{t(subItem.labelKey)}</span>
+                  </span>
+                </Link>
+              );
+            })}
+            {adminHasPersonalTimeClock ? (
+              <div className="space-y-0.5">
                 <button
                   type="button"
-                  onClick={() => setAdminDataSectionOpen((v) => !v)}
-                  aria-expanded={adminDataSectionOpen}
-                  aria-controls="admin-data-submenu"
-                  id="admin-data-menu-button"
+                  id="admin-data-fichaje-button"
+                  onClick={() => setAdminDataFichajeOpen((v) => !v)}
+                  aria-expanded={adminDataFichajeOpen}
+                  aria-controls="admin-data-fichaje-submenu"
                   className={cn(
-                    "flex w-full items-center justify-between gap-2 rounded-lg border-l-2 px-3 py-2.5 text-sm transition-colors",
-                    isAdminDataSectionActive
-                      ? "-ml-px border-primary bg-primary/20 pl-[11px] font-bold text-primary"
-                      : flyoutLight
-                        ? "border-transparent font-medium text-muted-foreground hover:bg-muted hover:text-foreground"
-                        : "border-transparent font-medium text-slate-300 hover:bg-slate-800 hover:text-white"
+                    "flex w-full items-center justify-between gap-2 rounded-lg px-3 py-2 text-sm transition-colors",
+                    isAdminDataFichajeSectionActive
+                      ? "bg-primary/20 font-bold text-primary"
+                      : "font-medium text-slate-300 hover:bg-slate-800 hover:text-white"
                   )}
                 >
-                  <span className="flex min-w-0 items-center gap-3">
-                    <Database className="h-4 w-4 shrink-0 opacity-90" aria-hidden />
-                    {user ? <AdminDataNavHeading user={user} /> : <span className="truncate">— DATA</span>}
+                  <span className="flex min-w-0 items-center gap-2">
+                    <Clock3 className="h-4 w-4 shrink-0 opacity-90" aria-hidden />
+                    <span className="truncate">{t("admin.layout.nav_admin_data_fichaje")}</span>
                   </span>
                   <ChevronDown
-                    className={cn("h-4 w-4 shrink-0 transition-transform", adminDataSectionOpen && "rotate-180")}
+                    className={cn(
+                      "h-4 w-4 shrink-0 transition-transform opacity-80",
+                      adminDataFichajeOpen && "rotate-180"
+                    )}
                     aria-hidden
                   />
                 </button>
-                {adminDataSectionOpen ? (
+                {adminDataFichajeOpen ? (
                   <div
-                    id="admin-data-submenu"
+                    id="admin-data-fichaje-submenu"
                     role="region"
-                    aria-labelledby="admin-data-menu-button"
-                    className="space-y-1 pl-8"
+                    aria-labelledby="admin-data-fichaje-button"
+                    className="ml-1 space-y-0.5 border-l-2 border-slate-600/60 pl-3"
                   >
-                    {adminSelfServiceItems.map((subItem) => {
-                      const subActive = isNavActive(subItem.to);
-                      const subAttention = navNeedsAttention(subItem.to);
-                      const SubIcon = subItem.icon;
-                      return (
-                        <Link
-                          key={subItem.to}
-                          to={subItem.to}
-                          onClick={() => mobile && setMobileNavOpen(false)}
-                          className={cn(
-                            "flex items-center justify-between gap-2 rounded-lg px-3 py-2 text-sm transition-colors w-full",
-                            subActive
-                              ? "bg-primary/20 font-bold text-primary"
-                              : subAttention
-                                ? flyoutLight
-                                  ? "font-semibold text-red-600 hover:bg-red-50"
-                                  : "font-semibold text-red-400 hover:bg-slate-800"
-                                : flyoutLight
-                                  ? "text-muted-foreground hover:bg-muted hover:text-foreground"
-                                  : "text-slate-300 hover:bg-slate-800 hover:text-white"
-                          )}
-                        >
-                          <span className="flex min-w-0 items-center gap-2">
-                            <SubIcon className="h-4 w-4 shrink-0 opacity-90" aria-hidden />
-                            <span className="truncate">{t(subItem.labelKey)}</span>
-                          </span>
-                        </Link>
-                      );
-                    })}
-                    {adminHasPersonalTimeClock ? (
-                      <div className="space-y-0.5">
-                        <button
-                          type="button"
-                          id="admin-data-fichaje-button"
-                          onClick={() => setAdminDataFichajeOpen((v) => !v)}
-                          aria-expanded={adminDataFichajeOpen}
-                          aria-controls="admin-data-fichaje-submenu"
-                          className={cn(
-                            "flex w-full items-center justify-between gap-2 rounded-lg px-3 py-2 text-sm transition-colors",
-                            isAdminDataFichajeSectionActive
-                              ? "bg-primary/20 font-bold text-primary"
-                              : flyoutLight
-                                ? "font-medium text-muted-foreground hover:bg-muted hover:text-foreground"
-                                : "font-medium text-slate-300 hover:bg-slate-800 hover:text-white"
-                          )}
-                        >
-                          <span className="flex min-w-0 items-center gap-2">
-                            <Clock3 className="h-4 w-4 shrink-0 opacity-90" aria-hidden />
-                            <span className="truncate">{t("admin.layout.nav_admin_data_fichaje")}</span>
-                          </span>
-                          <ChevronDown
-                            className={cn(
-                              "h-4 w-4 shrink-0 transition-transform opacity-80",
-                              adminDataFichajeOpen && "rotate-180"
-                            )}
-                            aria-hidden
-                          />
-                        </button>
-                        {adminDataFichajeOpen ? (
-                          <div
-                            id="admin-data-fichaje-submenu"
-                            role="region"
-                            aria-labelledby="admin-data-fichaje-button"
-                            className={cn(
-                              "ml-1 space-y-0.5 border-l-2 pl-3",
-                              flyoutLight ? "border-slate-200" : "border-slate-600/60"
-                            )}
-                          >
-                            {WORKER_TIME_CLOCK_NAV_SUBITEMS.map((sub) => {
-                              const SubIcon = sub.icon;
-                              const subActive = isNavActive(sub.to);
-                              return (
-                                <Link
-                                  key={sub.to}
-                                  to={sub.to}
-                                  onClick={() => mobile && setMobileNavOpen(false)}
-                                  className={cn(
-                                    "flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-sm transition-colors",
-                                    subActive
-                                      ? "bg-primary/15 font-semibold text-primary"
-                                      : flyoutLight
-                                        ? "text-muted-foreground hover:bg-muted hover:text-foreground"
-                                        : "text-slate-300 hover:bg-slate-800 hover:text-white"
-                                  )}
-                                >
-                                  <SubIcon className="h-3.5 w-3.5 shrink-0 opacity-80" aria-hidden />
-                                  <span className="truncate">{t(sub.labelKey)}</span>
-                                </Link>
-                              );
-                            })}
-                          </div>
-                        ) : null}
-                      </div>
-                    ) : null}
-                  </div>
-                ) : null}
-              </div>
-            ) : null}
-            {item.to === "/admin/vacaciones" && isAdmin && usersNavItems.length > 0 ? (
-              <div className="space-y-1">
-                <button
-                  type="button"
-                  onClick={() => setUsersSectionOpen((v) => !v)}
-                  aria-expanded={usersSectionOpen}
-                  className={cn(
-                    "flex items-center justify-between gap-2 rounded-lg px-3 py-2.5 text-sm transition-colors w-full border-l-2",
-                    isUsersSectionActive
-                      ? "font-bold text-primary bg-primary/20 border-primary -ml-px pl-[11px]"
-                      : flyoutLight
-                        ? "font-medium text-muted-foreground hover:bg-muted hover:text-foreground border-transparent"
-                        : "font-medium text-slate-300 hover:bg-slate-800 hover:text-white border-transparent"
-                  )}
-                >
-                  <span className="flex items-center gap-3 min-w-0">
-                    <Users className="h-4 w-4 shrink-0 opacity-90" />
-                    <span className="truncate">{t("admin.layout.nav_users")}</span>
-                  </span>
-                  <ChevronDown
-                    className={cn("h-4 w-4 shrink-0 transition-transform", usersSectionOpen && "rotate-180")}
-                  />
-                </button>
-                {usersSectionOpen ? (
-                  <div className="space-y-1 pl-8">
-                    {usersNavItems.map((sub) => {
+                    {WORKER_TIME_CLOCK_NAV_SUBITEMS.map((sub) => {
+                      const SubIcon = sub.icon;
                       const subActive = isNavActive(sub.to);
                       return (
                         <Link
@@ -610,14 +646,13 @@ const AdminLayout = () => {
                           to={sub.to}
                           onClick={() => mobile && setMobileNavOpen(false)}
                           className={cn(
-                            "flex items-center justify-between gap-2 rounded-lg px-3 py-2 text-sm transition-colors w-full",
+                            "flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-sm transition-colors",
                             subActive
-                              ? "bg-primary/20 text-primary font-bold"
-                              : flyoutLight
-                                ? "text-muted-foreground hover:bg-muted hover:text-foreground"
-                                : "text-slate-300 hover:bg-slate-800 hover:text-white"
+                              ? "bg-primary/15 font-semibold text-primary"
+                              : "text-slate-300 hover:bg-slate-800 hover:text-white"
                           )}
                         >
+                          <SubIcon className="h-3.5 w-3.5 shrink-0 opacity-80" aria-hidden />
                           <span className="truncate">{t(sub.labelKey)}</span>
                         </Link>
                       );
@@ -626,13 +661,264 @@ const AdminLayout = () => {
                 ) : null}
               </div>
             ) : null}
-            {item.to === "/admin/control-fichajes" && isAdmin && timeClockNavItems.length > 0 ? (
-              null
-            ) : null}
-          </Fragment>
-        );
-      })}
-      {workerHasTimeClockModule ? (
+          </div>
+        ) : null}
+      </div>
+    ) : null;
+
+    const adminUsersSubmenu =
+      usersNavItems.length > 0 ? (
+        <div className="space-y-1">
+          <button
+            type="button"
+            onClick={() => setUsersSectionOpen((v) => !v)}
+            aria-expanded={usersSectionOpen}
+            className={cn(
+              "flex items-center justify-between gap-2 rounded-lg px-3 py-2.5 text-sm transition-colors w-full border-l-2",
+              isUsersSectionActive
+                ? "font-bold text-primary bg-primary/20 border-primary -ml-px pl-[11px]"
+                : "font-medium text-slate-300 hover:bg-slate-800 hover:text-white border-transparent"
+            )}
+          >
+            <span className="flex items-center gap-3 min-w-0">
+              <Users className="h-4 w-4 shrink-0 opacity-90" />
+              <span className="truncate">{t("admin.layout.nav_users")}</span>
+            </span>
+            <ChevronDown
+              className={cn("h-4 w-4 shrink-0 transition-transform", usersSectionOpen && "rotate-180")}
+            />
+          </button>
+          {usersSectionOpen ? (
+            <div className="space-y-1 pl-8">
+              {usersNavItems.map((sub) => {
+                const subActive = isNavActive(sub.to);
+                return (
+                  <Link
+                    key={sub.to}
+                    to={sub.to}
+                    onClick={() => mobile && setMobileNavOpen(false)}
+                    className={cn(
+                      "flex items-center justify-between gap-2 rounded-lg px-3 py-2 text-sm transition-colors w-full",
+                      subActive
+                        ? "bg-primary/20 text-primary font-bold"
+                        : "text-slate-300 hover:bg-slate-800 hover:text-white"
+                    )}
+                  >
+                    <span className="truncate">{t(sub.labelKey)}</span>
+                  </Link>
+                );
+              })}
+            </div>
+          ) : null}
+        </div>
+      ) : null;
+
+    const adminMessagesHub =
+      adminMessageItems.length > 0 ? (
+        <div className="space-y-1">
+          <button
+            type="button"
+            onClick={() => setAdminMessagesOpen((v) => !v)}
+            aria-label={
+              pendingAdminMessagesCount > 0
+                ? t("admin.layout.nav_messages_hub_pending_aria").replace(
+                    "{{count}}",
+                    String(pendingAdminMessagesCount)
+                  )
+                : undefined
+            }
+            className={cn(
+              "flex items-center justify-between gap-2 rounded-lg px-3 py-2.5 text-sm transition-colors w-full",
+              isAdminMessagesSectionActive && "font-bold bg-primary/20 text-primary border-l-2 border-primary -ml-px pl-[11px]",
+              pendingAdminMessagesCount > 0
+                ? "font-bold text-red-400 border-l-2 border-transparent hover:bg-slate-800 hover:text-red-300"
+                : "font-medium text-slate-300 hover:bg-slate-800 hover:text-white border-l-2 border-transparent"
+            )}
+          >
+            <span className="flex items-center gap-3 min-w-0">
+              <Inbox
+                className={cn(
+                  "h-4 w-4 shrink-0 opacity-90",
+                  pendingAdminMessagesCount > 0 && "text-red-400 opacity-100"
+                )}
+              />
+              <span className="truncate">{t("admin.layout.nav_messages_hub")}</span>
+            </span>
+            <span className="inline-flex items-center gap-1.5">
+              {pendingAdminMessagesCount > 0 ? (
+                <Badge
+                  variant="secondary"
+                  className="shrink-0 h-5 min-w-[1.25rem] px-1.5 text-[10px] font-semibold tabular-nums bg-primary/25 text-primary border-0"
+                >
+                  {pendingAdminMessagesCount > 99 ? "99+" : pendingAdminMessagesCount}
+                </Badge>
+              ) : null}
+              <ChevronDown
+                className={cn("h-4 w-4 shrink-0 transition-transform", adminMessagesOpen && "rotate-180")}
+              />
+            </span>
+          </button>
+          {adminMessagesOpen ? (
+            <div className="space-y-1 pl-8">
+              {adminMessageItems.map((item) => {
+                const active = isNavActive(item.to);
+                const attention = navNeedsAttention(item.to);
+                const childCount =
+                  item.to === ADMIN_PATHS.solicitudesVacaciones
+                    ? pendingVacationRequestCount
+                    : item.to === ADMIN_PATHS.solicitudesFicha
+                      ? pendingAdminProfileCount
+                      : 0;
+                const pendingLabel =
+                  item.to === ADMIN_PATHS.solicitudesFicha && pendingAdminProfileCount > 0
+                    ? t("admin.layout.nav_pending_profile_requests_aria").replace(
+                        "{{count}}",
+                        String(pendingAdminProfileCount)
+                      )
+                    : item.to === ADMIN_PATHS.solicitudesVacaciones && pendingVacationRequestCount > 0
+                      ? t("admin.layout.nav_vacation_requests_pending_aria").replace(
+                          "{{count}}",
+                          String(pendingVacationRequestCount)
+                        )
+                      : undefined;
+                return (
+                  <Link
+                    key={item.to}
+                    to={item.to}
+                    onClick={() => mobile && setMobileNavOpen(false)}
+                    aria-label={pendingLabel}
+                    title={pendingLabel}
+                    className={cn(
+                      "flex items-center justify-between gap-2 rounded-lg px-3 py-2 text-sm transition-colors w-full",
+                      active
+                        ? attention
+                          ? "bg-red-950/50 text-red-400 font-bold"
+                          : "bg-primary/20 text-primary font-bold"
+                        : attention
+                          ? "text-red-400 hover:bg-slate-800 hover:text-red-300"
+                          : "text-slate-300 hover:bg-slate-800 hover:text-white"
+                    )}
+                  >
+                    <span className="truncate">{t(item.labelKey)}</span>
+                    {childCount > 0 ? (
+                      <Badge
+                        variant="secondary"
+                        className="shrink-0 h-5 min-w-[1.25rem] px-1.5 text-[10px] font-semibold tabular-nums bg-primary/25 text-primary border-0"
+                      >
+                        {childCount > 99 ? "99+" : childCount}
+                      </Badge>
+                    ) : null}
+                  </Link>
+                );
+              })}
+            </div>
+          ) : null}
+        </div>
+      ) : null;
+
+    const adminTimeClockHub =
+      timeClockNavItems.length > 0 ? (
+        <div className="space-y-1">
+          <button
+            type="button"
+            onClick={() => setTimeClockSectionOpen((v) => !v)}
+            aria-expanded={timeClockSectionOpen}
+            className={cn(
+              "flex items-center justify-between gap-2 rounded-lg px-3 py-2.5 text-sm transition-colors w-full border-l-2",
+              isTimeClockSectionActive
+                ? "font-bold text-primary bg-primary/20 border-primary -ml-px pl-[11px]"
+                : "font-medium text-slate-300 hover:bg-slate-800 hover:text-white border-transparent"
+            )}
+          >
+            <span className="flex items-center gap-3 min-w-0">
+              <Clock3 className="h-4 w-4 shrink-0 opacity-90" />
+              <span className="truncate">{t("admin.layout.nav_time_clock_hub")}</span>
+            </span>
+            <ChevronDown
+              className={cn("h-4 w-4 shrink-0 transition-transform", timeClockSectionOpen && "rotate-180")}
+            />
+          </button>
+          {timeClockSectionOpen ? (
+            <div className="space-y-1 pl-8">
+              {timeClockNavItems.map((sub) => {
+                const subActive = isNavActive(sub.to);
+                return (
+                  <Link
+                    key={sub.to}
+                    to={sub.to}
+                    onClick={() => mobile && setMobileNavOpen(false)}
+                    className={cn(
+                      "flex items-center justify-between gap-2 rounded-lg px-3 py-2 text-sm transition-colors w-full",
+                      subActive
+                        ? "bg-primary/20 text-primary font-bold"
+                        : "text-slate-300 hover:bg-slate-800 hover:text-white"
+                    )}
+                  >
+                    <span className="truncate">{t(sub.labelKey)}</span>
+                  </Link>
+                );
+              })}
+            </div>
+          ) : null}
+        </div>
+      ) : null;
+
+    if (isAdmin) {
+      const adminMainSeparatorClass =
+        "my-3 h-0.5 rounded-full bg-slate-400/45 shrink-0";
+
+      return (
+        <>
+          {ADMIN_MAIN_NAV_SEGMENTS.map((seg) => {
+            if (seg.kind === "panel") {
+              return adminSidebarPanelItem ? (
+                <Fragment key="admin-panel">{renderTopNavItem(adminSidebarPanelItem)}</Fragment>
+              ) : null;
+            }
+            if (seg.kind === "messages_hub") {
+              return <Fragment key="admin-messages-hub">{adminMessagesHub}</Fragment>;
+            }
+            if (seg.kind === "users_submenu") {
+              return <Fragment key="admin-users-submenu">{adminUsersSubmenu}</Fragment>;
+            }
+            if (seg.kind === "time_clock_hub") {
+              return <Fragment key="admin-time-clock-hub">{adminTimeClockHub}</Fragment>;
+            }
+            if (seg.kind === "dms") {
+              return adminSidebarDmsItem ? (
+                <Fragment key={adminSidebarDmsItem.to}>{renderTopNavItem(adminSidebarDmsItem)}</Fragment>
+              ) : null;
+            }
+            if (seg.kind === "bulk_invoices") {
+              const item = navItems.find((i) => i.to === "/admin/generador-facturas-masivas");
+              return item ? <Fragment key={item.to}>{renderTopNavItem(item)}</Fragment> : null;
+            }
+            if (seg.kind === "web_form_messages") {
+              const item = navItems.find((i) => i.to === ADMIN_PATHS.mensajesFormularioWeb);
+              return item ? <Fragment key={item.to}>{renderTopNavItem(item)}</Fragment> : null;
+            }
+            if (seg.kind === "link") {
+              const item = navItems.find((i) => i.to === seg.path);
+              return item ? <Fragment key={seg.path}>{renderTopNavItem(item)}</Fragment> : null;
+            }
+            return null;
+          })}
+          {showAdminDataNav ? (
+            <>
+              <Separator className={adminMainSeparatorClass} />
+              {adminPersonalSubmenu}
+            </>
+          ) : null}
+        </>
+      );
+    }
+
+    const workerOperationalNavItems = WORKER_SIDEBAR_OPERATIONAL_PATHS.map((path) =>
+      navItems.find((i) => i.to === path)
+    ).filter((x): x is NavItem => x != null);
+
+    const renderWorkerTimeClockHub = () =>
+      workerHasTimeClockModule ? (
         <div className="space-y-1">
           <button
             type="button"
@@ -686,169 +972,33 @@ const AdminLayout = () => {
             </div>
           ) : null}
         </div>
-      ) : null}
-      {isAdmin && timeClockNavItems.length > 0 ? (
-        <div className="space-y-1">
-          <button
-            type="button"
-            onClick={() => setTimeClockSectionOpen((v) => !v)}
-            aria-expanded={timeClockSectionOpen}
-            className={cn(
-              "flex items-center justify-between gap-2 rounded-lg px-3 py-2.5 text-sm transition-colors w-full border-l-2",
-              isTimeClockSectionActive
-                ? "font-bold text-primary bg-primary/20 border-primary -ml-px pl-[11px]"
-                : flyoutLight
-                  ? "font-medium text-muted-foreground hover:bg-muted hover:text-foreground border-transparent"
-                  : "font-medium text-slate-300 hover:bg-slate-800 hover:text-white border-transparent"
-            )}
-          >
-            <span className="flex items-center gap-3 min-w-0">
-              <Clock3 className="h-4 w-4 shrink-0 opacity-90" />
-              <span className="truncate">{t("admin.layout.nav_time_clock_hub")}</span>
-            </span>
-            <ChevronDown
-              className={cn("h-4 w-4 shrink-0 transition-transform", timeClockSectionOpen && "rotate-180")}
-            />
-          </button>
-          {timeClockSectionOpen ? (
-            <div className="space-y-1 pl-8">
-              {timeClockNavItems.map((sub) => {
-                const subActive = isNavActive(sub.to);
-                return (
-                  <Link
-                    key={sub.to}
-                    to={sub.to}
-                    onClick={() => mobile && setMobileNavOpen(false)}
-                    className={cn(
-                      "flex items-center justify-between gap-2 rounded-lg px-3 py-2 text-sm transition-colors w-full",
-                      subActive
-                        ? "bg-primary/20 text-primary font-bold"
-                        : flyoutLight
-                          ? "text-muted-foreground hover:bg-muted hover:text-foreground"
-                          : "text-slate-300 hover:bg-slate-800 hover:text-white"
-                    )}
-                  >
-                    <span className="truncate">{t(sub.labelKey)}</span>
-                  </Link>
-                );
-              })}
-            </div>
-          ) : null}
-        </div>
-      ) : null}
-      {isAdmin && adminMessageItems.length > 0 ? (
-        <div className="space-y-1">
-          <button
-            type="button"
-            onClick={() => setAdminMessagesOpen((v) => !v)}
-            aria-label={
-              pendingAdminMessagesCount > 0
-                ? t("admin.layout.nav_messages_hub_pending_aria").replace(
-                    "{{count}}",
-                    String(pendingAdminMessagesCount)
-                  )
-                : undefined
-            }
-            className={cn(
-              "flex items-center justify-between gap-2 rounded-lg px-3 py-2.5 text-sm transition-colors w-full",
-              isAdminMessagesSectionActive && "font-bold bg-primary/20 text-primary border-l-2 border-primary -ml-px pl-[11px]",
-              pendingAdminMessagesCount > 0
-                ? flyoutLight
-                  ? "font-bold text-red-600 border-l-2 border-transparent hover:bg-red-50 hover:text-red-800"
-                  : "font-bold text-red-400 border-l-2 border-transparent hover:bg-slate-800 hover:text-red-300"
-                : flyoutLight
-                  ? "font-medium text-muted-foreground hover:bg-muted hover:text-foreground border-l-2 border-transparent"
-                  : "font-medium text-slate-300 hover:bg-slate-800 hover:text-white border-l-2 border-transparent"
-            )}
-          >
-            <span className="flex items-center gap-3 min-w-0">
-              <Inbox
-                className={cn(
-                  "h-4 w-4 shrink-0 opacity-90",
-                  pendingAdminMessagesCount > 0 &&
-                    (flyoutLight ? "text-red-600 opacity-100" : "text-red-400 opacity-100")
-                )}
-              />
-              <span className="truncate">{t("admin.layout.nav_messages_hub")}</span>
-            </span>
-            <span className="inline-flex items-center gap-1.5">
-              {pendingAdminMessagesCount > 0 ? (
-                <Badge
-                  variant="secondary"
-                  className="shrink-0 h-5 min-w-[1.25rem] px-1.5 text-[10px] font-semibold tabular-nums bg-primary/25 text-primary border-0"
-                >
-                  {pendingAdminMessagesCount > 99 ? "99+" : pendingAdminMessagesCount}
-                </Badge>
-              ) : null}
-              <ChevronDown
-                className={cn("h-4 w-4 shrink-0 transition-transform", adminMessagesOpen && "rotate-180")}
-              />
-            </span>
-          </button>
-          {adminMessagesOpen ? (
-            <div className="space-y-1 pl-8">
-              {adminMessageItems.map((item) => {
-                const active = isNavActive(item.to);
-                const attention = navNeedsAttention(item.to);
-                const childCount =
-                  item.to === ADMIN_PATHS.solicitudesVacaciones
-                    ? pendingVacationRequestCount
-                    : item.to === ADMIN_PATHS.solicitudesFicha
-                      ? pendingAdminProfileCount
-                      : 0;
-                const pendingLabel =
-                  item.to === ADMIN_PATHS.solicitudesFicha && pendingAdminProfileCount > 0
-                    ? t("admin.layout.nav_pending_profile_requests_aria").replace(
-                        "{{count}}",
-                        String(pendingAdminProfileCount)
-                      )
-                    : item.to === ADMIN_PATHS.solicitudesVacaciones && pendingVacationRequestCount > 0
-                      ? t("admin.layout.nav_vacation_requests_pending_aria").replace(
-                          "{{count}}",
-                          String(pendingVacationRequestCount)
-                        )
-                      : undefined;
-                return (
-                  <Link
-                    key={item.to}
-                    to={item.to}
-                    onClick={() => mobile && setMobileNavOpen(false)}
-                    aria-label={pendingLabel}
-                    title={pendingLabel}
-                    className={cn(
-                      "flex items-center justify-between gap-2 rounded-lg px-3 py-2 text-sm transition-colors w-full",
-                      active
-                        ? attention
-                          ? flyoutLight
-                            ? "bg-red-100 text-red-800 font-bold"
-                            : "bg-red-950/50 text-red-400 font-bold"
-                          : "bg-primary/20 text-primary font-bold"
-                        : attention
-                          ? flyoutLight
-                            ? "text-red-600 hover:bg-red-50 hover:text-red-800"
-                            : "text-red-400 hover:bg-slate-800 hover:text-red-300"
-                          : flyoutLight
-                            ? "text-muted-foreground hover:bg-muted hover:text-foreground"
-                            : "text-slate-300 hover:bg-slate-800 hover:text-white"
-                    )}
-                  >
-                    <span className="truncate">{t(item.labelKey)}</span>
-                    {childCount > 0 ? (
-                      <Badge
-                        variant="secondary"
-                        className="shrink-0 h-5 min-w-[1.25rem] px-1.5 text-[10px] font-semibold tabular-nums bg-primary/25 text-primary border-0"
-                      >
-                        {childCount > 99 ? "99+" : childCount}
-                      </Badge>
-                    ) : null}
-                  </Link>
-                );
-              })}
-            </div>
-          ) : null}
-        </div>
-      ) : null}
-    </>
+      ) : null;
+
+    return (
+      <>
+        {WORKER_SIDEBAR_PERSONAL_SEGMENTS.map((seg, segIdx) => {
+          if (seg.kind === "time_clock") {
+            return (
+              <Fragment key={`worker-nav-tc-${segIdx}`}>{renderWorkerTimeClockHub()}</Fragment>
+            );
+          }
+          const item = navItems.find((i) => i.to === seg.path);
+          if (!item) return null;
+          return (
+            <Fragment key={seg.path}>
+              {renderTopNavItem(item)}
+            </Fragment>
+          );
+        })}
+        {workerOperationalNavItems.length > 0 ? (
+          <>
+            <Separator className="my-3 h-0.5 rounded-full bg-muted-foreground/55 dark:bg-muted-foreground/45" />
+            {workerOperationalNavItems.map((item) => (
+              <Fragment key={item.to}>{renderTopNavItem(item)}</Fragment>
+            ))}
+          </>
+        ) : null}
+      </>
     );
   };
 
@@ -869,6 +1019,7 @@ const AdminLayout = () => {
             <NavLinks
               vacationNotifyCount={pendingVacationRequestCount}
               expensePendingCount={pendingExpenseSheetCount}
+              assignedDocsPendingCount={pendingAssignedDocsCount}
             />
           </nav>
           <div className="p-4 border-t border-slate-800/80">
@@ -884,36 +1035,17 @@ const AdminLayout = () => {
         {/* Contenido principal */}
         <div className="flex-1 flex flex-col min-h-screen bg-slate-50 dark:bg-slate-950/50">
           <header className="sticky top-0 z-20 flex h-14 items-center justify-between gap-3 border-b border-slate-200/80 bg-white/95 px-4 shadow-sm backdrop-blur supports-[backdrop-filter]:bg-white/80 dark:border-slate-800 dark:bg-slate-900/95">
-            <div className="flex min-w-0 flex-1 items-center gap-2">
-              <div className="relative shrink-0">
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="md:hidden -ml-1"
-                  onClick={() => setMobileNavOpen((o) => !o)}
-                  aria-label={mobileNavOpen ? t("admin.layout.close_menu") : t("admin.layout.menu")}
-                >
-                  {mobileNavOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
-                </Button>
-                {mobileNavOpen ? (
-                  <div className="md:hidden absolute left-2 top-full z-50 mt-1.5 w-[min(18rem,calc(100vw-2rem))] rounded-lg border border-slate-200 bg-white py-2 text-foreground shadow-xl animate-in slide-in-from-top-2 fade-in duration-200">
-                    <div className="border-b border-slate-200 px-3 pb-2">
-                      <p className="text-[9px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
-                        {t("admin.layout.brand")}
-                      </p>
-                      <p className="text-xs font-bold text-foreground leading-tight">{t("admin.layout.admin_title")}</p>
-                    </div>
-                    <nav className="max-h-[min(65vh,calc(100vh-9rem))] space-y-0.5 overflow-y-auto p-2 text-sm">
-                      <NavLinks
-                        mobile
-                        vacationNotifyCount={pendingVacationRequestCount}
-                        expensePendingCount={pendingExpenseSheetCount}
-                      />
-                    </nav>
-                  </div>
-                ) : null}
-              </div>
-              <span className="truncate text-sm font-medium text-muted-foreground md:hidden">
+            <div className="flex items-center gap-2 min-w-0">
+              <Button
+                variant="ghost"
+                size="icon"
+                className="md:hidden shrink-0 -ml-1"
+                onClick={() => setMobileNavOpen((o) => !o)}
+                aria-label={t("admin.layout.menu")}
+              >
+                <Menu className="h-5 w-5" />
+              </Button>
+              <span className="text-sm font-medium text-muted-foreground truncate md:hidden">
                 {t("admin.layout.mobile_title")}
               </span>
             </div>
@@ -939,6 +1071,31 @@ const AdminLayout = () => {
             </div>
           </header>
 
+          {mobileNavOpen && (
+            <>
+              <button
+                type="button"
+                className="md:hidden fixed inset-0 z-30 bg-slate-950/60 backdrop-blur-sm"
+                aria-label={t("admin.layout.close_menu")}
+                onClick={() => setMobileNavOpen(false)}
+              />
+              <div className="md:hidden fixed inset-y-0 left-0 z-40 w-72 max-w-[85vw] bg-slate-950 border-r border-slate-800 shadow-xl flex flex-col">
+                <div className="p-5 border-b border-slate-800">
+                  <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-slate-500">{t("admin.layout.brand")}</p>
+                  <p className="text-lg font-bold text-white">{t("admin.layout.admin_title")}</p>
+                </div>
+                <nav className="flex-1 p-3 space-y-1 overflow-y-auto">
+                  <NavLinks
+                  mobile
+                  vacationNotifyCount={pendingVacationRequestCount}
+                  expensePendingCount={pendingExpenseSheetCount}
+                  assignedDocsPendingCount={pendingAssignedDocsCount}
+                />
+                </nav>
+              </div>
+            </>
+          )}
+
           <main className="flex-1 p-4 lg:p-8 max-w-[1600px] w-full mx-auto">
             <Outlet />
           </main>
@@ -953,32 +1110,19 @@ const AdminLayout = () => {
     <>
       <IntranetAttentionDialogs />
     <div className="min-h-screen bg-background flex flex-col">
-      <header className="sticky top-0 z-10 border-b bg-card/95 backdrop-blur supports-[backdrop-filter]:bg-card/60">
-        <div className="mx-auto flex h-14 w-full max-w-7xl items-center justify-between gap-2 px-4 lg:px-6">
-          <div className="flex min-w-0 flex-1 items-center gap-2">
-            <div className="relative shrink-0">
-              <Button
-                variant="ghost"
-                size="icon"
-                className="md:hidden"
-                onClick={() => setMobileNavOpen((o) => !o)}
-                aria-label={mobileNavOpen ? t("admin.layout.close_menu") : t("admin.layout.menu")}
-              >
-                {mobileNavOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
-              </Button>
-              {mobileNavOpen ? (
-                <div className="md:hidden absolute left-2 top-full z-50 mt-1.5 w-[min(18rem,calc(100vw-2rem))] rounded-lg border border-slate-200 bg-white py-2 shadow-lg animate-in slide-in-from-top-2 fade-in duration-200">
-                  <nav className="max-h-[min(65vh,calc(100vh-9rem))] space-y-0.5 overflow-y-auto p-2 text-sm">
-                    <NavLinks
-                      mobile
-                      vacationNotifyCount={pendingVacationRequestCount}
-                      expensePendingCount={pendingExpenseSheetCount}
-                    />
-                  </nav>
-                </div>
-              ) : null}
-            </div>
-            <h1 className="truncate text-lg font-semibold tracking-tight">{t("admin.common.backoffice")}</h1>
+      <header className="border-b bg-card/95 backdrop-blur supports-[backdrop-filter]:bg-card/60 sticky top-0 z-10">
+        <div className="flex h-14 items-center justify-between px-4 lg:px-6 max-w-7xl mx-auto w-full gap-2">
+          <div className="flex items-center gap-2 min-w-0">
+            <Button
+              variant="ghost"
+              size="icon"
+              className="md:hidden shrink-0"
+              onClick={() => setMobileNavOpen((o) => !o)}
+              aria-label={t("admin.layout.menu")}
+            >
+              <Menu className="h-5 w-5" />
+            </Button>
+            <h1 className="font-semibold text-lg tracking-tight truncate">{t("admin.common.backoffice")}</h1>
             {user && (
               <>
                 <span className="text-muted-foreground text-sm hidden sm:inline truncate">
@@ -1006,15 +1150,29 @@ const AdminLayout = () => {
         </div>
       </header>
 
-      <div className="mx-auto flex w-full max-w-7xl flex-1">
+      <div className="flex flex-1 max-w-7xl mx-auto w-full">
         <aside className="hidden md:flex w-56 shrink-0 border-r bg-muted/30 flex-col py-4">
           <nav className="px-2 space-y-1">
             <NavLinks
               vacationNotifyCount={pendingVacationRequestCount}
               expensePendingCount={pendingExpenseSheetCount}
+              assignedDocsPendingCount={pendingAssignedDocsCount}
             />
           </nav>
         </aside>
+
+        {mobileNavOpen && (
+          <div className="md:hidden fixed inset-0 z-20 bg-background/80 backdrop-blur-sm top-14">
+            <nav className="flex max-h-[calc(100vh-3.5rem)] flex-col gap-1 overflow-y-auto border-b bg-card p-4">
+              <NavLinks
+                  mobile
+                  vacationNotifyCount={pendingVacationRequestCount}
+                  expensePendingCount={pendingExpenseSheetCount}
+                  assignedDocsPendingCount={pendingAssignedDocsCount}
+                />
+            </nav>
+          </div>
+        )}
 
         <main className="flex-1 p-4 lg:p-8 overflow-auto">
           <Outlet />

@@ -30,10 +30,19 @@ export const queryKeys = {
     ["workersTimeClockEvents", workerIdsKey, fromIsoDate, toIsoDate] as const,
   workerAgendaItems: (companyWorkerId: string, fromIsoDate: string, toIsoDate: string) =>
     ["workerAgendaItems", companyWorkerId, fromIsoDate, toIsoDate] as const,
+  adminAgendaAuditItems: (fromIsoDate: string, toIsoDate: string) =>
+    ["adminAgendaAuditItems", fromIsoDate, toIsoDate] as const,
   billingIssuers: ["billingIssuers"] as const,
   billingSeries: ["billingSeries"] as const,
   billingInvoices: ["billingInvoices"] as const,
   workerExpenseSheets: (companyWorkerId: string) => ["workerExpenseSheets", companyWorkerId] as const,
   workerExpenseSheetsAdmin: ["workerExpenseSheets", "admin"] as const,
+  dmsDocuments: (filtersKey: string) => ["dmsDocuments", filtersKey] as const,
+  dmsDocument: (id: string) => ["dmsDocument", id] as const,
+  dmsDocumentVersions: (documentId: string) => ["dmsDocumentVersions", documentId] as const,
+  dmsDocumentPermissions: (documentId: string) => ["dmsDocumentPermissions", documentId] as const,
+  dmsDocumentLogs: (documentId: string) => ["dmsDocumentLogs", documentId] as const,
+  dmsDocumentReviews: (documentId: string) => ["dmsDocumentReviews", documentId] as const,
+  myDmsDocumentReviews: ["myDmsDocumentReviews"] as const,
   contactSubmissions: ["contactSubmissions"] as const,
 };

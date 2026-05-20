@@ -2,6 +2,8 @@ import { getProfileByAuthUserId } from "@/api/backofficeUsersApi";
 import { PROJECT_DOCUMENTS_BUCKET } from "@/api/projectsApi";
 import { requireSupabase } from "@/api/supabaseRequire";
 import { getErrorMessage } from "@/lib/errorMessage";
+import { sortByLocaleKey } from "@/lib/sortAlpha";
+import { BILLING_COLLECTION_EPS } from "@/lib/billingCollectionSemaphore";
 import { isInormeInformaticaOrganizacionIssuer } from "@/lib/billingPrivacyFooter";
 import type {
   BillingInvoiceLineRow,
@@ -157,15 +159,16 @@ function invoiceRowToDomain(
 export async function fetchBillingSeries(): Promise<BillingSeriesRecord[]> {
   await requireProfile();
   const sb = requireSupabase();
-  const { data, error } = await sb.from("billing_series").select("*").order("code", { ascending: true });
+  const { data, error } = await sb.from("billing_series").select("*");
   if (error) throwErr(error);
-  return ((data ?? []) as BillingSeriesRow[]).map((s) => ({
+  const list = ((data ?? []) as BillingSeriesRow[]).map((s) => ({
     id: s.id,
     issuerId: s.issuer_id,
     code: s.code,
     label: s.label,
     active: s.active,
   }));
+  return sortByLocaleKey(list, (s) => s.label || s.code);
 }
 
 function issuerRowToDomain(row: BillingIssuerRow): BillingIssuerRecord {
@@ -325,9 +328,10 @@ export async function removeBillingIssuerLogo(issuerId: string): Promise<void> {
 export async function fetchBillingIssuers(): Promise<BillingIssuerRecord[]> {
   await requireProfile();
   const sb = requireSupabase();
-  const { data, error } = await sb.from("billing_issuers").select("*").order("code", { ascending: true });
+  const { data, error } = await sb.from("billing_issuers").select("*");
   if (error) throwErr(error);
-  return ((data ?? []) as BillingIssuerRow[]).map(issuerRowToDomain);
+  const list = ((data ?? []) as BillingIssuerRow[]).map(issuerRowToDomain);
+  return sortByLocaleKey(list, (i) => i.legalName || i.code);
 }
 
 export async function createBillingIssuer(input: {
@@ -687,20 +691,101 @@ export async function createBillingInvoiceDraft(input: BillingInvoiceDraftInput)
   return invoiceRowToDomain(newRow, series?.code ?? "?", issuerCode, (newLines ?? []) as BillingInvoiceLineRow[]);
 }
 
-export async function createRectificativeDraftFromInvoice(originalInvoiceId: string, seriesId: string): Promise<BillingInvoiceRecord> {
+/**
+ * Líneas para borrador rectificativo: mismos conceptos y tipos que la factura emitida,
+ * con cantidades invertidas en líneas facturables (base e impuestos en negativo).
+ */
+function rectificativeLineInputsFromSource(lines: BillingInvoiceLineRecord[]): BillingInvoiceLineInput[] {
+  return [...lines]
+    .sort((a, b) => a.lineOrder - b.lineOrder)
+    .map((line) => {
+      const lt = line.lineType ?? "BILLABLE";
+      const pctRaw = line.billableHoursPercent;
+      const pct =
+        pctRaw != null && String(pctRaw).trim() !== "" ? clampBillableHoursPercent(parseMoney(pctRaw)) : 100;
+      if (lt !== "BILLABLE") {
+        return {
+          lineType: lt,
+          description: line.description ?? "",
+          quantity: 0,
+          unitPrice: 0,
+          billableHoursPercent: 100,
+          vatRate: parseMoney(line.vatRate) as BillingInvoiceLineInput["vatRate"],
+          irpfRate: 0,
+        };
+      }
+      return {
+        lineType: "BILLABLE",
+        description: line.description ?? "",
+        quantity: -parseMoney(line.quantity),
+        unitPrice: parseMoney(line.unitPrice),
+        billableHoursPercent: pct,
+        vatRate: parseMoney(line.vatRate) as BillingInvoiceLineInput["vatRate"],
+        irpfRate: parseMoney(line.irpfRate),
+      };
+    });
+}
+
+/** Texto en línea tipo CONCEPT (tabla «Concepto» del PDF): motivo + referencia factura rectificada. */
+function rectificativeConceptLineDescription(rectificationReason: string, rectifiedInvoiceRef: string): string {
+  const r = rectificationReason.trim();
+  return `Motivo de rectificación: ${r}. Factura rectificada: ${rectifiedInvoiceRef}.`;
+}
+
+function rectificativeDraftLineInputs(
+  sourceLines: BillingInvoiceLineRecord[],
+  rectificationReason: string,
+  rectifiedInvoiceRef: string
+): BillingInvoiceLineInput[] {
+  const headerLine: BillingInvoiceLineInput = {
+    lineType: "CONCEPT",
+    description: rectificativeConceptLineDescription(rectificationReason, rectifiedInvoiceRef),
+    quantity: 0,
+    unitPrice: 0,
+    billableHoursPercent: 100,
+    vatRate: 21,
+    irpfRate: 0,
+  };
+  return [headerLine, ...rectificativeLineInputsFromSource(sourceLines)];
+}
+
+export async function createRectificativeDraftFromInvoice(
+  originalInvoiceId: string,
+  seriesId: string,
+  rectificationReason: string
+): Promise<BillingInvoiceRecord> {
   const all = await fetchBillingInvoices();
   const source = all.find((i) => i.id === originalInvoiceId);
   if (!source) throw new Error("Factura origen no encontrada.");
-  return createBillingInvoiceDraft({
+  if (source.status === "DRAFT") throw new Error("Solo se pueden rectificar facturas ya emitidas.");
+  if (source.status === "CANCELLED") throw new Error("No se puede rectificar una factura anulada.");
+
+  const reason = rectificationReason.trim();
+  if (!reason) throw new Error("Indica el motivo de la rectificación.");
+
+  const refSuffix =
+    source.invoiceNumber != null && source.fiscalYear != null
+      ? `${source.seriesCode}-${source.fiscalYear}/${String(source.invoiceNumber).padStart(4, "0")}`
+      : `${source.seriesCode}-${source.fiscalYear ?? "----"}/${source.invoiceNumber ?? ""}`.trim();
+
+  const draft = await createBillingInvoiceDraft({
     issuerId: source.issuerId,
     seriesId,
     clientId: source.clientId,
     invoiceKind: "RECTIFICATIVE",
     rectifiesInvoiceId: source.id,
+    issueDate: source.issueDate?.trim() ? source.issueDate.trim() : undefined,
     dueDate: source.dueDate,
-    notes: `Rectificativa de ${source.seriesCode}-${source.fiscalYear ?? "----"}/${source.invoiceNumber ?? ""}`.trim(),
+    notes: `Rectificación de factura ${refSuffix}.\n\nMotivo: ${reason}`.trim(),
     allowInactiveIssuer: true,
   });
+
+  await replaceBillingInvoiceLines(draft.id, rectificativeDraftLineInputs(source.lines, reason, refSuffix));
+
+  const refreshed = await fetchBillingInvoices();
+  const out = refreshed.find((i) => i.id === draft.id);
+  if (!out) throw new Error("No se pudo cargar el borrador rectificativo.");
+  return out;
 }
 
 function lineRowToDraftInput(row: BillingInvoiceLineRow): BillingInvoiceLineInput {
@@ -1025,6 +1110,21 @@ export async function registerBillingReceipt(input: {
   const invoice = inv as BillingInvoiceRow;
   if (invoice.status === "DRAFT" || invoice.status === "CANCELLED") {
     throw new Error("Solo se pueden registrar cobros en facturas emitidas.");
+  }
+
+  const { data: prevRows, error: prevErr } = await sb.from("billing_receipts").select("amount").eq("invoice_id", input.invoiceId);
+  if (prevErr) throwErr(prevErr);
+  const prevCollected =
+    Math.round(
+      ((prevRows ?? []) as { amount: unknown }[]).reduce((acc, r) => acc + parseMoney(r.amount), 0) * 100
+    ) / 100;
+  const invoiceTotal = parseMoney(invoice.grand_total);
+  const maxPending = Math.round((invoiceTotal - prevCollected) * 100) / 100;
+  const nextCollected = Math.round((prevCollected + input.amount) * 100) / 100;
+  if (nextCollected > invoiceTotal + BILLING_COLLECTION_EPS) {
+    throw new Error(
+      `El cobro superaría el total de la factura (importe máximo pendiente: ${maxPending.toFixed(2)} €).`
+    );
   }
 
   const { data: inserted, error } = await sb

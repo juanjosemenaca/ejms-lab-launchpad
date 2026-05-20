@@ -2,13 +2,12 @@ import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { LanguageProvider } from "@/contexts/LanguageContext";
 import { AdminAuthProvider } from "@/contexts/AdminAuthContext";
 import { ProtectedRoute } from "@/components/admin/ProtectedRoute";
 import { PasswordChangeGate } from "@/components/admin/PasswordChangeGate";
 import { RoleRoute } from "@/components/admin/RoleRoute";
-import { ADMIN_ROUTE_SEG } from "@/constants/adminPaths";
 import Index from "./pages/Index";
 import NotFound from "./pages/NotFound";
 import AdminLogin from "./pages/admin/AdminLogin";
@@ -27,6 +26,7 @@ import AdminChangePassword from "./pages/admin/AdminChangePassword";
 import WorkerMyProfile from "./pages/admin/WorkerMyProfile";
 import WorkerMyCalendar from "./pages/admin/WorkerMyCalendar";
 import WorkerMessages from "./pages/admin/WorkerMessages";
+import WorkerPendingDocuments from "./pages/admin/WorkerPendingDocuments";
 import AdminWorkerMessages from "./pages/admin/AdminWorkerMessages";
 import AdminWebFormMessages from "./pages/admin/AdminWebFormMessages";
 import AdminWorkerProfileRequests from "./pages/admin/AdminWorkerProfileRequests";
@@ -43,6 +43,9 @@ import AdminWorkerAgenda from "./pages/admin/AdminWorkerAgenda";
 import WorkerExpenses from "./pages/admin/WorkerExpenses";
 import AdminWorkerExpenses from "./pages/admin/AdminWorkerExpenses";
 import AdminBilling from "./pages/admin/AdminBilling";
+import AdminDms from "./pages/admin/AdminDms";
+import AdminBulkInvoices from "./pages/admin/AdminBulkInvoices";
+import { ADMIN_ROUTE_SEG } from "@/constants/adminPaths";
 
 const queryClient = new QueryClient();
 
@@ -135,15 +138,23 @@ const App = () => (
                 <Route
                   path="mensajes"
                   element={
-                    <RoleRoute allowedRoles={["WORKER", "ADMIN"]} requiredModule="MESSAGES">
+                    <RoleRoute allowedRoles={["WORKER", "ADMIN"]}>
                       <WorkerMessages />
+                    </RoleRoute>
+                  }
+                />
+                <Route
+                  path="documentos-pendientes"
+                  element={
+                    <RoleRoute allowedRoles={["WORKER"]}>
+                      <WorkerPendingDocuments />
                     </RoleRoute>
                   }
                 />
                 <Route
                   path="facturacion"
                   element={
-                    <RoleRoute allowedRoles={["WORKER", "ADMIN"]}>
+                    <RoleRoute allowedRoles={["WORKER", "ADMIN"]} requiredModule="FACTURACION">
                       <AdminBilling />
                     </RoleRoute>
                   }
@@ -220,7 +231,7 @@ const App = () => (
                 <Route
                   path="clientes"
                   element={
-                    <RoleRoute allowedRoles={["ADMIN"]}>
+                    <RoleRoute allowedRoles={["ADMIN", "WORKER"]} requiredModule="ADMIN_CLIENTS">
                       <AdminClients />
                     </RoleRoute>
                   }
@@ -228,15 +239,23 @@ const App = () => (
                 <Route
                   path="proyectos"
                   element={
-                    <RoleRoute allowedRoles={["ADMIN"]}>
+                    <RoleRoute allowedRoles={["ADMIN", "WORKER"]} requiredModule="ADMIN_PROJECTS">
                       <AdminProjects />
+                    </RoleRoute>
+                  }
+                />
+                <Route
+                  path="documentos"
+                  element={
+                    <RoleRoute allowedRoles={["ADMIN", "WORKER"]} requiredModule="DMS">
+                      <AdminDms />
                     </RoleRoute>
                   }
                 />
                 <Route
                   path="proveedores"
                   element={
-                    <RoleRoute allowedRoles={["ADMIN"]}>
+                    <RoleRoute allowedRoles={["ADMIN", "WORKER"]} requiredModule="ADMIN_PROVIDERS">
                       <AdminProviders />
                     </RoleRoute>
                   }
@@ -244,8 +263,16 @@ const App = () => (
                 <Route
                   path="trabajadores"
                   element={
-                    <RoleRoute allowedRoles={["ADMIN"]}>
+                    <RoleRoute allowedRoles={["ADMIN", "WORKER"]} requiredModule="ADMIN_COMPANY_WORKERS">
                       <AdminCompanyWorkers />
+                    </RoleRoute>
+                  }
+                />
+                <Route
+                  path="generador-facturas-masivas"
+                  element={
+                    <RoleRoute allowedRoles={["ADMIN"]}>
+                      <AdminBulkInvoices />
                     </RoleRoute>
                   }
                 />

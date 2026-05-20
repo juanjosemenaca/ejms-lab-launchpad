@@ -31,24 +31,9 @@ import {
 } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { SearchableSelect } from "@/components/ui/searchable-select";
 import { Textarea } from "@/components/ui/textarea";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
+import { DoubleConfirmAlertDialog } from "@/components/ui/double-confirm-alert-dialog";
 
 const NONE_VALUE = "__none__";
 
@@ -380,26 +365,22 @@ export function ProjectFormDialog({
                 render={({ field }) => (
                   <FormItem>
                     <FormLabel>{labels.client}</FormLabel>
-                    <Select
-                      onValueChange={(v) => field.onChange(v === NONE_VALUE ? "" : v)}
-                      value={field.value?.trim() ? field.value : NONE_VALUE}
-                    >
-                      <FormControl>
-                        <SelectTrigger>
-                          <SelectValue placeholder={labels.clientPlaceholder} />
-                        </SelectTrigger>
-                      </FormControl>
-                      <SelectContent>
-                        <SelectItem value={NONE_VALUE}>{labels.clientPlaceholder}</SelectItem>
-                        {clients
-                          .filter((c) => c.active)
-                          .map((c) => (
-                            <SelectItem key={c.id} value={c.id}>
-                              {c.tradeName} — {c.companyName}
-                            </SelectItem>
-                          ))}
-                      </SelectContent>
-                    </Select>
+                    <FormControl>
+                      <SearchableSelect
+                        value={field.value?.trim() ? field.value : NONE_VALUE}
+                        onValueChange={(v) => field.onChange(v === NONE_VALUE ? "" : v)}
+                        options={[
+                          { value: NONE_VALUE, label: labels.clientPlaceholder },
+                          ...clients
+                            .filter((c) => c.active)
+                            .map((c) => ({
+                              value: c.id,
+                              label: `${c.tradeName} — ${c.companyName}`,
+                            })),
+                        ]}
+                        placeholder={labels.clientPlaceholder}
+                      />
+                    </FormControl>
                     <FormMessage />
                   </FormItem>
                 )}
@@ -413,24 +394,21 @@ export function ProjectFormDialog({
                     <FormItem>
                       <FormLabel>{labels.finalClient}</FormLabel>
                       <p className="text-xs text-muted-foreground">{labels.finalClientHint}</p>
-                      <Select
-                        onValueChange={(v) => field.onChange(v === NONE_VALUE ? "" : v)}
-                        value={field.value?.trim() ? field.value : NONE_VALUE}
-                      >
-                        <FormControl>
-                          <SelectTrigger>
-                            <SelectValue placeholder={labels.finalNone} />
-                          </SelectTrigger>
-                        </FormControl>
-                        <SelectContent>
-                          <SelectItem value={NONE_VALUE}>{labels.finalNone}</SelectItem>
-                          {finalClientOptions.map((c) => (
-                            <SelectItem key={c.id} value={c.id} disabled={c.id === clientId}>
-                              {c.tradeName} — {c.companyName}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                      <FormControl>
+                        <SearchableSelect
+                          value={field.value?.trim() ? field.value : NONE_VALUE}
+                          onValueChange={(v) => field.onChange(v === NONE_VALUE ? "" : v)}
+                          options={[
+                            { value: NONE_VALUE, label: labels.finalNone },
+                            ...finalClientOptions.map((c) => ({
+                              value: c.id,
+                              label: `${c.tradeName} — ${c.companyName}`,
+                              disabled: c.id === clientId,
+                            })),
+                          ]}
+                          placeholder={labels.finalNone}
+                        />
+                      </FormControl>
                       <FormMessage />
                     </FormItem>
                   )}
@@ -473,24 +451,20 @@ export function ProjectFormDialog({
                   <FormItem>
                     <FormLabel>{labels.responsible}</FormLabel>
                     <p className="text-xs text-muted-foreground -mt-0.5 mb-1">{labels.responsibleShortHint}</p>
-                    <Select
-                      onValueChange={(v) => field.onChange(v === NONE_VALUE ? "" : v)}
-                      value={field.value?.trim() ? field.value : NONE_VALUE}
-                    >
-                      <FormControl>
-                        <SelectTrigger>
-                          <SelectValue placeholder={labels.responsiblePlaceholder} />
-                        </SelectTrigger>
-                      </FormControl>
-                      <SelectContent>
-                        <SelectItem value={NONE_VALUE}>{labels.responsiblePlaceholder}</SelectItem>
-                        {responsibleWorkerOptions.map((w) => (
-                          <SelectItem key={w.id} value={w.id}>
-                            {workerDisplayName(w)}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                    <FormControl>
+                      <SearchableSelect
+                        value={field.value?.trim() ? field.value : NONE_VALUE}
+                        onValueChange={(v) => field.onChange(v === NONE_VALUE ? "" : v)}
+                        options={[
+                          { value: NONE_VALUE, label: labels.responsiblePlaceholder },
+                          ...responsibleWorkerOptions.map((w) => ({
+                            value: w.id,
+                            label: workerDisplayName(w),
+                          })),
+                        ]}
+                        placeholder={labels.responsiblePlaceholder}
+                      />
+                    </FormControl>
                     <FormMessage />
                   </FormItem>
                 )}
@@ -533,42 +507,34 @@ export function ProjectFormDialog({
                         >
                           <div className="flex-1 space-y-1 min-w-0">
                             <label className="text-xs text-muted-foreground">{labels.memberWorker}</label>
-                            <Select
+                            <SearchableSelect
                               value={row.companyWorkerId || NONE_VALUE}
                               onValueChange={(v) =>
                                 updateMemberRow(row.rowKey, { companyWorkerId: v === NONE_VALUE ? "" : v })
                               }
-                            >
-                              <SelectTrigger>
-                                <SelectValue placeholder={labels.memberPlaceholder} />
-                              </SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value={NONE_VALUE}>{labels.memberPlaceholder}</SelectItem>
-                                {selectWorkers.map((w) => (
-                                  <SelectItem key={w.id} value={w.id}>
-                                    {workerDisplayName(w)}
-                                  </SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
+                              options={[
+                                { value: NONE_VALUE, label: labels.memberPlaceholder },
+                                ...selectWorkers.map((w) => ({
+                                  value: w.id,
+                                  label: workerDisplayName(w),
+                                })),
+                              ]}
+                              placeholder={labels.memberPlaceholder}
+                              className="h-9"
+                            />
                           </div>
                           <div className="w-full sm:w-52 space-y-1 shrink-0">
                             <label className="text-xs text-muted-foreground">{labels.memberRole}</label>
-                            <Select
+                            <SearchableSelect
                               value={row.role}
                               onValueChange={(v) => updateMemberRow(row.rowKey, { role: v as ProjectMemberRole })}
-                            >
-                              <SelectTrigger>
-                                <SelectValue />
-                              </SelectTrigger>
-                              <SelectContent>
-                                {PROJECT_MEMBER_ROLES.map((role) => (
-                                  <SelectItem key={role} value={role}>
-                                    {roleLabels[role]}
-                                  </SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
+                              options={PROJECT_MEMBER_ROLES.map((role) => ({
+                                value: role,
+                                label: roleLabels[role],
+                              }))}
+                              searchable={false}
+                              className="h-9"
+                            />
                           </div>
                           <Button
                             type="button"
@@ -693,30 +659,20 @@ export function ProjectFormDialog({
         </DialogContent>
       </Dialog>
 
-      <AlertDialog open={!!docToDelete} onOpenChange={() => !deletingDoc && setDocToDelete(null)}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>{labels.deleteDocTitle}</AlertDialogTitle>
-            <AlertDialogDescription>
-              {labels.deleteDocDesc}{" "}
-              <strong>{docToDelete?.originalFilename}</strong>
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={deletingDoc}>{labels.cancel}</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={(e) => {
-                e.preventDefault();
-                void confirmDeleteDoc();
-              }}
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-              disabled={deletingDoc}
-            >
-              {deletingDoc ? <Loader2 className="h-4 w-4 animate-spin" /> : labels.deleteDoc}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      <DoubleConfirmAlertDialog
+        open={!!docToDelete}
+        onOpenChange={(o) => {
+          if (!o && !deletingDoc) setDocToDelete(null);
+        }}
+        onConfirm={() => void confirmDeleteDoc()}
+        title={labels.deleteDocTitle}
+        description={
+          <>
+            {labels.deleteDocDesc} <strong>{docToDelete?.originalFilename}</strong>
+          </>
+        }
+        disabled={deletingDoc}
+      />
     </>
   );
 }

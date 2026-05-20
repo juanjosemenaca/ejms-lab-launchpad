@@ -5,7 +5,18 @@
  */
 
 export type DbUserRole = "ADMIN" | "WORKER";
-export type DbWorkerModuleKey = "VACATIONS" | "MESSAGES" | "TIME_CLOCK" | "AGENDA" | "GASTOS";
+export type DbWorkerModuleKey =
+  | "VACATIONS"
+  | "MESSAGES"
+  | "TIME_CLOCK"
+  | "AGENDA"
+  | "GASTOS"
+  | "FACTURACION"
+  | "DMS"
+  | "ADMIN_COMPANY_WORKERS"
+  | "ADMIN_CLIENTS"
+  | "ADMIN_PROJECTS"
+  | "ADMIN_PROVIDERS";
 
 export type DbEmploymentType =
   | "FIJO"
@@ -120,6 +131,21 @@ export interface ProjectDocumentRow {
   original_filename: string;
   file_size: number;
   mime_type: string;
+  created_at: string;
+}
+
+export type DbEntityDocumentOwnerType = "COMPANY_WORKER" | "CLIENT" | "PROVIDER";
+
+export interface EntityDocumentRow {
+  id: string;
+  owner_type: DbEntityDocumentOwnerType;
+  owner_id: string;
+  storage_path: string;
+  original_filename: string;
+  file_size: number;
+  mime_type: string;
+  /** CV = curriculum vitae; OTHER = adjunto general. */
+  kind: "CV" | "OTHER";
   created_at: string;
 }
 
@@ -302,8 +328,6 @@ export interface CompanyWorkerVacationDayRow {
   id: string;
   company_worker_id: string;
   vacation_date: string;
-  /** Año de origen del cupo (traspaso); null = cupo del año de vacation_date. */
-  carryover_from_year: number | null;
   created_at: string;
   updated_at: string;
 }
@@ -342,7 +366,9 @@ export interface WorkerTimeClockEventRow {
 
 export interface WorkerAgendaItemRow {
   id: string;
-  company_worker_id: string;
+  company_worker_id: string | null;
+  applies_to_all_company_workers: boolean;
+  project_id: string | null;
   title: string;
   description: string | null;
   starts_at: string;
@@ -529,14 +555,73 @@ export interface BillingAuditLogRow {
   created_at: string;
 }
 
-export interface ContactSubmissionRow {
+/** Gestor documental (DMS) — filas Postgres */
+export interface DmsDocumentRow {
   id: string;
-  created_at: string;
   name: string;
-  email: string;
-  company: string;
-  message: string;
-  source: string;
+  description: string;
+  document_type: string;
+  client_id: string | null;
+  project_id: string | null;
+  current_version_id: string | null;
+  created_by_backoffice_user_id: string;
+  tags: string[];
+  metadata: Record<string, unknown>;
+  search_text: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface DmsDocumentVersionRow {
+  id: string;
+  document_id: string;
+  version_number: number;
+  storage_path: string;
+  file_size: number;
+  mime_type: string;
+  original_filename: string;
+  comment: string;
+  created_by_backoffice_user_id: string | null;
+  created_at: string;
+}
+
+export interface DmsDocumentPermissionRow {
+  id: string;
+  document_id: string;
+  backoffice_user_id: string;
+  permission: string;
+  created_at: string;
+}
+
+export interface DmsDocumentLogRow {
+  id: string;
+  document_id: string | null;
+  backoffice_user_id: string | null;
+  action: string;
+  details: Record<string, unknown>;
+  created_at: string;
+}
+
+export interface DmsDocumentReviewRow {
+  id: string;
+  document_id: string;
+  assignee_backoffice_user_id: string;
+  assigned_by_backoffice_user_id: string;
+  status: string;
+  request_note: string;
+  worker_note: string;
+  requested_at: string;
+  submitted_at: string | null;
+  approved_by_backoffice_user_id: string | null;
+  approved_at: string | null;
+  rejection_reason: string;
+  target_version_id: string | null;
+  updated_at: string;
+  task_read_at?: string | null;
+  task_review_at?: string | null;
+  task_validate_at?: string | null;
+  task_upload_at?: string | null;
+  worker_outcome?: string | null;
 }
 
 /** Perfil backoffice (sin contraseña; Auth en `auth.users`). */

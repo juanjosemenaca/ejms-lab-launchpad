@@ -15,9 +15,10 @@ import {
   CommandList,
 } from "@/components/ui/command";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { SearchableSelect } from "@/components/ui/searchable-select";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { DoubleConfirmAlertDialog } from "@/components/ui/double-confirm-alert-dialog";
 import { useLanguage } from "@/contexts/LanguageContext";
 import { useCompanyWorkers } from "@/hooks/useCompanyWorkers";
 import { useWorkerTimeClockEvents } from "@/hooks/useTimeTracking";
@@ -80,6 +81,8 @@ const AdminTimeClock = () => {
   const [newAbsenceReason, setNewAbsenceReason] = useState("");
   const [expandedDayIso, setExpandedDayIso] = useState<string | null>(null);
   const [draftById, setDraftById] = useState<Record<string, { kind: TimeClockEventKind; at: string; comment: string; absenceReason: string }>>({});
+  const [pendingDeleteDayIso, setPendingDeleteDayIso] = useState<string | null>(null);
+  const [pendingDeleteEventId, setPendingDeleteEventId] = useState<string | null>(null);
   const workers = useMemo(() => (workersQuery.data ?? []).filter((w) => w.active), [workersQuery.data]);
   const selectedWorker = useMemo(() => workers.find((w) => w.id === workerId), [workers, workerId]);
   const { from, to } = useMemo(() => monthRange(month), [month]);
@@ -188,6 +191,7 @@ const AdminTimeClock = () => {
   }, [events]);
 
   return (
+    <>
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-bold tracking-tight flex items-center gap-2">
@@ -283,16 +287,15 @@ const AdminTimeClock = () => {
             </CardHeader>
             <CardContent className="space-y-3">
               <div className="grid gap-3 md:grid-cols-[180px_220px_1fr]">
-                <Select value={newKind} onValueChange={(v) => setNewKind(v as TimeClockEventKind)}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {EVENT_KINDS.map((k) => (
-                      <SelectItem key={k} value={k}>{t(`admin.timeClock.kind_${k.toLowerCase()}`)}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <SearchableSelect
+                  value={newKind}
+                  onValueChange={(v) => setNewKind(v as TimeClockEventKind)}
+                  options={EVENT_KINDS.map((k) => ({
+                    value: k,
+                    label: t(`admin.timeClock.kind_${k.toLowerCase()}`),
+                  }))}
+                  searchable={false}
+                />
                 <Input type="datetime-local" value={newAt} onChange={(e) => setNewAt(e.target.value)} />
                 <Input
                   value={newKind === "ABSENCE" ? newAbsenceReason : newComment}
@@ -376,13 +379,7 @@ const AdminTimeClock = () => {
                                   size="sm"
                                   variant="destructive"
                                   disabled={deleteDayMutation.isPending}
-                                  onClick={() => {
-                                    const ok = window.confirm(
-                                      t("admin.timeClock.delete_day_confirm").replace("{{day}}", day.dayIso)
-                                    );
-                                    if (!ok) return;
-                                    deleteDayMutation.mutate(day.dayIso);
-                                  }}
+                                  onClick={() => setPendingDeleteDayIso(day.dayIso)}
                                 >
                                   {t("admin.timeClock.delete_day_action")}
                                 </Button>
@@ -424,23 +421,20 @@ const AdminTimeClock = () => {
                                               <p className="text-[11px] text-muted-foreground mt-1">{formatDt(e.eventAt)}</p>
                                             </TableCell>
                                             <TableCell className="min-w-[180px]">
-                                              <Select
+                                              <SearchableSelect
                                                 value={d.kind}
                                                 onValueChange={(v) =>
-                                                  setDraftById((prev) => ({ ...prev, [e.id]: { ...d, kind: v as TimeClockEventKind } }))
+                                                  setDraftById((prev) => ({
+                                                    ...prev,
+                                                    [e.id]: { ...d, kind: v as TimeClockEventKind },
+                                                  }))
                                                 }
-                                              >
-                                                <SelectTrigger>
-                                                  <SelectValue />
-                                                </SelectTrigger>
-                                                <SelectContent>
-                                                  {EVENT_KINDS.map((k) => (
-                                                    <SelectItem key={k} value={k}>
-                                                      {t(`admin.timeClock.kind_${k.toLowerCase()}`)}
-                                                    </SelectItem>
-                                                  ))}
-                                                </SelectContent>
-                                              </Select>
+                                                options={EVENT_KINDS.map((k) => ({
+                                                  value: k,
+                                                  label: t(`admin.timeClock.kind_${k.toLowerCase()}`),
+                                                }))}
+                                                searchable={false}
+                                              />
                                               <Badge variant="outline" className="mt-2">
                                                 {e.source}
                                               </Badge>
@@ -509,7 +503,7 @@ const AdminTimeClock = () => {
                                                   size="icon"
                                                   variant="ghost"
                                                   className="text-destructive"
-                                                  onClick={() => deleteMutation.mutate(e.id)}
+                                                  onClick={() => setPendingDeleteEventId(e.id)}
                                                 >
                                                   <Trash2 className="h-4 w-4" />
                                                 </Button>
@@ -541,6 +535,37 @@ const AdminTimeClock = () => {
         </Card>
       )}
     </div>
+
+    <DoubleConfirmAlertDialog
+        open={!!pendingDeleteDayIso}
+        onOpenChange={(o) => {
+          if (!o) setPendingDeleteDayIso(null);
+        }}
+        onConfirm={() => {
+          if (pendingDeleteDayIso) deleteDayMutation.mutate(pendingDeleteDayIso);
+        }}
+        title={t("admin.timeClock.delete_day_action")}
+        description={
+          pendingDeleteDayIso
+            ? t("admin.timeClock.delete_day_confirm").replace("{{day}}", pendingDeleteDayIso)
+            : ""
+        }
+        disabled={deleteDayMutation.isPending}
+      />
+
+    <DoubleConfirmAlertDialog
+        open={!!pendingDeleteEventId}
+        onOpenChange={(o) => {
+          if (!o) setPendingDeleteEventId(null);
+        }}
+        onConfirm={() => {
+          if (pendingDeleteEventId) deleteMutation.mutate(pendingDeleteEventId);
+        }}
+        title={t("admin.timeClock.delete_event_title")}
+        description={t("admin.timeClock.delete_event_desc")}
+        disabled={deleteMutation.isPending}
+      />
+    </>
   );
 };
 

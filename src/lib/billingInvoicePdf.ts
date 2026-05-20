@@ -258,12 +258,12 @@ async function drawIssuerLogoTopRight(
   logoDataUrl: string,
   pageW: number,
   margin: number
-): Promise<void> {
+): Promise<number> {
   const fmt = logoDataUrl.startsWith("data:image/png") ? "PNG" : "JPEG";
   const maxW = 44;
   const maxH = 22;
   const { width: pxW, height: pxH } = await getImagePixelSizeFromDataUrl(logoDataUrl);
-  if (pxW <= 0 || pxH <= 0) return;
+  if (pxW <= 0 || pxH <= 0) return margin;
   const ar = pxW / pxH;
   let logoW = maxW;
   let logoH = logoW / ar;
@@ -274,6 +274,7 @@ async function drawIssuerLogoTopRight(
   /** Más arriba y separado del bloque de datos (y menor = más cerca del borde superior). */
   const logoTopMm = 7;
   doc.addImage(logoDataUrl, fmt, pageW - margin - logoW, logoTopMm, logoW, logoH);
+  return logoTopMm + logoH;
 }
 
 function hrefFromWebsite(raw: string): string {
@@ -330,15 +331,20 @@ export async function generateBillingInvoicePdfBlob(
     addProformaWatermark(doc);
   }
 
+  let issuerLogoBottomY: number | null = null;
   if (resolvedLogoDataUrl) {
     try {
-      await drawIssuerLogoTopRight(doc, resolvedLogoDataUrl, pageW, margin);
+      issuerLogoBottomY = await drawIssuerLogoTopRight(doc, resolvedLogoDataUrl, pageW, margin);
     } catch {
       /* logo opcional; si falla el decode, seguimos sin él */
     }
   }
 
   let y = margin;
+  if (issuerLogoBottomY != null) {
+    /** Evita que el recuadro de cabecera (emisor/cliente) invada visualmente la zona del logo. */
+    y = Math.max(y, issuerLogoBottomY + 5);
+  }
 
   /** Avance vertical según tamaño de fuente (más compacto en cuerpos pequeños). */
   const bump = (size: number) => size * 0.42 + (size <= 8.5 ? 1.85 : 2.1);
@@ -460,7 +466,8 @@ export async function generateBillingInvoicePdfBlob(
 
   writeWebBox("Web", invoice.issuerWebsiteUrl);
 
-  y += 1;
+  const issuerToClientGapMm = 4;
+  y += issuerToClientGapMm;
   doc.setFont("helvetica", "bold");
   doc.setFontSize(boxLabel);
   doc.text("Cliente / Razón social", innerLeft, y);

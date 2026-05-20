@@ -13,28 +13,17 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { SearchableSelect } from "@/components/ui/searchable-select";
 import { SortableTableHead } from "@/components/admin/SortableTableHead";
 import { sortRows, toggleColumnSort, type ColumnSort } from "@/lib/adminListUtils";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
+import { DoubleConfirmAlertDialog } from "@/components/ui/double-confirm-alert-dialog";
 import { useClients } from "@/hooks/useClients";
 import { createClient, deleteClient, updateClient } from "@/api/clientsApi";
 import { queryKeys } from "@/lib/queryKeys";
+import {
+  completenessDotClass,
+  getClientCompleteness,
+} from "@/lib/adminEntityCompleteness";
 import type { ClientKind, ClientRecord } from "@/types/clients";
 import { ClientFormDialog, type ClientFormValues } from "@/components/admin/ClientFormDialog";
 import { useLanguage } from "@/contexts/LanguageContext";
@@ -68,6 +57,17 @@ const AdminClients = () => {
       setContactsClientId(null);
     }
   }, [contactsClientId, contactsClient]);
+
+  const clientCompletenessMeta = (c: ClientRecord) => {
+    const comp = getClientCompleteness(c);
+    const label =
+      comp.level === "green"
+        ? t("admin.workers.completeness_green")
+        : comp.level === "yellow"
+          ? t("admin.workers.completeness_yellow")
+          : t("admin.workers.completeness_red");
+    return { dotClass: completenessDotClass(comp.level), label };
+  };
 
   const finalClientOptions = useMemo(() => {
     return clients
@@ -269,29 +269,32 @@ const AdminClients = () => {
             </div>
             <div className="space-y-1 min-w-[160px]">
               <label className="text-xs text-muted-foreground">{t("admin.clients.filter_kind")}</label>
-              <Select value={kindFilter} onValueChange={(v) => setKindFilter(v as "all" | ClientKind)}>
-                <SelectTrigger className="h-9">
-                  <SelectValue placeholder={t("admin.common.filter_all")} />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">{t("admin.common.filter_all")}</SelectItem>
-                  <SelectItem value="FINAL">{t("admin.clients.kind_final")}</SelectItem>
-                  <SelectItem value="INTERMEDIARIO">{t("admin.clients.kind_intermediary")}</SelectItem>
-                </SelectContent>
-              </Select>
+              <SearchableSelect
+                value={kindFilter}
+                onValueChange={(v) => setKindFilter(v as "all" | ClientKind)}
+                options={[
+                  { value: "all", label: t("admin.common.filter_all") },
+                  { value: "FINAL", label: t("admin.clients.kind_final") },
+                  { value: "INTERMEDIARIO", label: t("admin.clients.kind_intermediary") },
+                ]}
+                searchable={false}
+                placeholder={t("admin.common.filter_all")}
+                className="h-9"
+              />
             </div>
             <div className="space-y-1 min-w-[140px]">
               <label className="text-xs text-muted-foreground">{t("admin.common.status")}</label>
-              <Select value={activeFilter} onValueChange={(v) => setActiveFilter(v as typeof activeFilter)}>
-                <SelectTrigger className="h-9">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">{t("admin.common.filter_all")}</SelectItem>
-                  <SelectItem value="active">{t("admin.common.filter_active")}</SelectItem>
-                  <SelectItem value="inactive">{t("admin.common.filter_inactive")}</SelectItem>
-                </SelectContent>
-              </Select>
+              <SearchableSelect
+                value={activeFilter}
+                onValueChange={(v) => setActiveFilter(v as typeof activeFilter)}
+                options={[
+                  { value: "all", label: t("admin.common.filter_all") },
+                  { value: "active", label: t("admin.common.filter_active") },
+                  { value: "inactive", label: t("admin.common.filter_inactive") },
+                ]}
+                searchable={false}
+                className="h-9"
+              />
             </div>
           </div>
         </CardHeader>
@@ -353,9 +356,20 @@ const AdminClients = () => {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {sorted.map((c) => (
+                {sorted.map((c) => {
+                  const sem = clientCompletenessMeta(c);
+                  return (
                   <TableRow key={c.id}>
-                    <TableCell className="font-medium">{c.tradeName}</TableCell>
+                    <TableCell className="font-medium">
+                      <div className="flex items-center gap-2">
+                        <span
+                          className={`inline-block h-3.5 w-3.5 rounded-full ${sem.dotClass} ring-1 ring-black/10 dark:ring-white/20 shrink-0`}
+                          title={sem.label}
+                          aria-label={sem.label}
+                        />
+                        <span>{c.tradeName}</span>
+                      </div>
+                    </TableCell>
                     <TableCell className="text-muted-foreground max-w-[200px] truncate">
                       {c.companyName}
                     </TableCell>
@@ -430,7 +444,8 @@ const AdminClients = () => {
                       </Button>
                     </TableCell>
                   </TableRow>
-                ))}
+                  );
+                })}
               </TableBody>
             </Table>
           )}
@@ -454,26 +469,20 @@ const AdminClients = () => {
         }}
       />
 
-      <AlertDialog open={!!deleteTarget} onOpenChange={() => setDeleteTarget(null)}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>{t("admin.clients.delete_title")}</AlertDialogTitle>
-            <AlertDialogDescription>
-              {t("admin.clients.delete_desc")} <strong>{deleteTarget?.tradeName}</strong>{" "}
-              {t("admin.clients.delete_desc_suffix")}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>{t("admin.common.cancel")}</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={() => void confirmDelete()}
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-            >
-              {t("admin.common.delete")}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      <DoubleConfirmAlertDialog
+        open={!!deleteTarget}
+        onOpenChange={(o) => {
+          if (!o) setDeleteTarget(null);
+        }}
+        onConfirm={() => void confirmDelete()}
+        title={t("admin.clients.delete_title")}
+        description={
+          <>
+            {t("admin.clients.delete_desc")} <strong>{deleteTarget?.tradeName}</strong>{" "}
+            {t("admin.clients.delete_desc_suffix")}
+          </>
+        }
+      />
     </div>
   );
 };

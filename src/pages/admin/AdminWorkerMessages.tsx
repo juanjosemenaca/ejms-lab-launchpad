@@ -2,8 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Archive, ArchiveRestore, Check, ChevronsUpDown, Loader2, MailPlus, Search, Send, Trash2 } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Button } from "@/components/ui/button";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -30,8 +29,8 @@ import {
 import { queryKeys } from "@/lib/queryKeys";
 import type { BackofficeMessageRecord } from "@/types/backofficeMessages";
 import { cn } from "@/lib/utils";
+import { DoubleConfirmAlertDialog } from "@/components/ui/double-confirm-alert-dialog";
 import { ContactSubmissionsPanel } from "@/components/admin/ContactSubmissionsPanel";
-
 const AdminWorkerMessages = () => {
   const { t, language } = useLanguage();
   const { user } = useAdminAuth();
@@ -48,6 +47,7 @@ const AdminWorkerMessages = () => {
   const [threadQuery, setThreadQuery] = useState("");
   const [activeThreadId, setActiveThreadId] = useState<string | null>(null);
   const [replyBody, setReplyBody] = useState("");
+  const [deleteThreadIdConfirm, setDeleteThreadIdConfirm] = useState<string | null>(null);
 
   const localeTag = language === "en" ? "en-GB" : language === "ca" ? "ca-ES" : "es-ES";
   const formatDt = (iso: string) =>
@@ -212,18 +212,24 @@ const AdminWorkerMessages = () => {
     },
   });
 
-  const workersTabInner =
-    isLoading ? (
+  if (isLoading) {
+    return (
       <div className="flex items-center justify-center gap-2 py-16 text-muted-foreground">
         <Loader2 className="h-6 w-6 animate-spin" />
         {t("admin.common.loading")}
       </div>
-    ) : isError ? (
+    );
+  }
+  if (isError) {
+    return (
       <p className="text-destructive text-sm py-8">
         {error instanceof Error ? error.message : t("admin.messages.load_error")}
       </p>
-    ) : (
-      <>
+    );
+  }
+
+  const workersTabInner = (
+    <>
       <Card>
         <CardHeader className="pb-2">
           <CardTitle className="text-base flex items-center gap-2">
@@ -406,7 +412,7 @@ const AdminWorkerMessages = () => {
                         variant="ghost"
                         className="gap-1 text-destructive"
                         disabled={deleteMutation.isPending}
-                        onClick={() => deleteMutation.mutate(activeThread.threadId)}
+                        onClick={() => setDeleteThreadIdConfirm(activeThread.threadId)}
                       >
                         <Trash2 className="h-3.5 w-3.5" />
                         {t("admin.messages.delete_thread")}
@@ -458,8 +464,8 @@ const AdminWorkerMessages = () => {
           )}
         </CardContent>
       </Card>
-      </>
-    );
+    </>
+  );
 
   return (
     <div className="space-y-6 max-w-6xl">
@@ -469,7 +475,7 @@ const AdminWorkerMessages = () => {
       </div>
 
       <Tabs defaultValue="workers" className="w-full">
-        <TabsList className="flex flex-wrap h-auto gap-1 p-1">
+        <TabsList className="flex h-auto flex-wrap gap-1 p-1">
           <TabsTrigger value="workers">{t("admin.messages.tab_workers")}</TabsTrigger>
           <TabsTrigger value="web">{t("admin.messages.tab_web_form")}</TabsTrigger>
         </TabsList>
@@ -480,6 +486,19 @@ const AdminWorkerMessages = () => {
           <ContactSubmissionsPanel />
         </TabsContent>
       </Tabs>
+
+      <DoubleConfirmAlertDialog
+        open={deleteThreadIdConfirm != null}
+        onOpenChange={(open) => {
+          if (!open) setDeleteThreadIdConfirm(null);
+        }}
+        onConfirm={() => {
+          if (deleteThreadIdConfirm) deleteMutation.mutate(deleteThreadIdConfirm);
+        }}
+        title={t("admin.messages.delete_thread_confirm_title")}
+        description={t("admin.messages.delete_thread_confirm_desc")}
+        disabled={deleteMutation.isPending}
+      />
     </div>
   );
 };

@@ -10,13 +10,8 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { SearchableSelect } from "@/components/ui/searchable-select";
+import { DoubleConfirmAlertDialog } from "@/components/ui/double-confirm-alert-dialog";
 import type { WorkerExpenseSheetAttachmentRecord } from "@/types/workerExpenses";
 
 type TFn = (key: string) => string;
@@ -293,7 +288,8 @@ export function ExpenseSheetAttachmentsEditor(props: {
   const WHOLE_PERIOD = "__whole__";
   const [attachDay, setAttachDay] = useState<string>(WHOLE_PERIOD);
   const [busy, setBusy] = useState(false);
-  const [deleteId, setDeleteId] = useState<string | null>(null);
+  const [deleteBusyId, setDeleteBusyId] = useState<string | null>(null);
+  const [pendingDeleteConfirmId, setPendingDeleteConfirmId] = useState<string | null>(null);
   const [openId, setOpenId] = useState<string | null>(null);
   const [webcamOpen, setWebcamOpen] = useState(false);
 
@@ -323,23 +319,22 @@ export function ExpenseSheetAttachmentsEditor(props: {
         <div className="flex flex-col sm:flex-row flex-wrap gap-3 items-start sm:items-end">
           <div className="space-y-1.5 min-w-[200px]">
             <Label className="text-xs">{t("admin.expenses.attachments_link_day")}</Label>
-            <Select value={attachDay} onValueChange={setAttachDay}>
-              <SelectTrigger className="h-9">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value={WHOLE_PERIOD}>{t("admin.expenses.attachments_period_wide")}</SelectItem>
-                {periodDates.map((d) => (
-                  <SelectItem key={d} value={d}>
-                    {new Date(`${d}T12:00:00`).toLocaleDateString(localeTag, {
-                      weekday: "short",
-                      day: "numeric",
-                      month: "short",
-                    })}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <SearchableSelect
+              value={attachDay}
+              onValueChange={setAttachDay}
+              options={[
+                { value: WHOLE_PERIOD, label: t("admin.expenses.attachments_period_wide") },
+                ...periodDates.map((d) => ({
+                  value: d,
+                  label: new Date(`${d}T12:00:00`).toLocaleDateString(localeTag, {
+                    weekday: "short",
+                    day: "numeric",
+                    month: "short",
+                  }),
+                })),
+              ]}
+              className="h-9"
+            />
           </div>
           <div className="flex flex-wrap gap-2">
             <input
@@ -401,17 +396,12 @@ export function ExpenseSheetAttachmentsEditor(props: {
         t={t}
         onDelete={
           editable
-            ? async (id) => {
-                setDeleteId(id);
-                try {
-                  await onDelete(id);
-                } finally {
-                  setDeleteId(null);
-                }
+            ? (id) => {
+                setPendingDeleteConfirmId(id);
               }
             : undefined
         }
-        deletePendingId={deleteId}
+        deletePendingId={deleteBusyId}
         onOpen={async (a) => {
           setOpenId(a.id);
           try {
@@ -421,6 +411,24 @@ export function ExpenseSheetAttachmentsEditor(props: {
           }
         }}
         openPendingId={openId}
+      />
+
+      <DoubleConfirmAlertDialog
+        open={pendingDeleteConfirmId != null}
+        onOpenChange={(open) => {
+          if (!open) setPendingDeleteConfirmId(null);
+        }}
+        onConfirm={() => {
+          const id = pendingDeleteConfirmId;
+          if (!id) return;
+          setDeleteBusyId(id);
+          void onDelete(id).finally(() => {
+            setDeleteBusyId(null);
+          });
+        }}
+        title={t("admin.expenses.attachments_delete_confirm_title")}
+        description={t("admin.expenses.attachments_delete_confirm_desc")}
+        disabled={deleteBusyId != null}
       />
     </div>
   );

@@ -50,7 +50,7 @@ import { isoDateOnlyFromDb } from "@/lib/isoDate";
 // ---------------------------------------------------------------------------
 
 export function projectRowToDomain(row: ProjectRow): ProjectRecord {
-  const code = row.project_code?.trim();
+  const code = (row as { project_code?: string }).project_code?.trim();
   return {
     id: row.id,
     projectCode: code || row.id,
@@ -368,7 +368,13 @@ function normalizeModules(value: unknown): WorkerModuleKey[] {
       raw === "MESSAGES" ||
       raw === "TIME_CLOCK" ||
       raw === "AGENDA" ||
-      raw === "GASTOS"
+      raw === "GASTOS" ||
+      raw === "FACTURACION" ||
+      raw === "DMS" ||
+      raw === "ADMIN_COMPANY_WORKERS" ||
+      raw === "ADMIN_CLIENTS" ||
+      raw === "ADMIN_PROJECTS" ||
+      raw === "ADMIN_PROVIDERS"
     ) {
       set.add(raw);
     }

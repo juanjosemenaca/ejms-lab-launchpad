@@ -1,7 +1,6 @@
 -- Grupo Legal: expedientes, clientes jurídicos, documentación, procedimientos,
 -- facturación interna del despacho, tiempos, agenda y auditoría.
 -- Independiente de public.clients / billing_invoices (facturación fiscal VeriFactu).
--- Copiado desde el proyecto Nueva_web para alinear migraciones con el mismo Supabase.
 
 -- ---------------------------------------------------------------------------
 -- Módulo habilitado por usuario (trabajador / admin con ficha)

@@ -23,7 +23,7 @@ function throwSupabaseError(err: unknown): never {
   throw new Error(getErrorMessage(err));
 }
 
-/** Si aún no está aplicada la migración 20260422170000_project_members_rpc.sql. */
+/** Si aún no está aplicada la migración 20260423150000_project_members_rpc.sql. */
 function isLikelyMissingProjectMembersRpcError(err: unknown): boolean {
   const m = getErrorMessage(err).toLowerCase();
   return (
@@ -39,7 +39,15 @@ function isProjectMembersSchemaCacheError(err: unknown): boolean {
 
 function isMissingProjectsColumnError(err: unknown, column: string): boolean {
   const m = getErrorMessage(err).toLowerCase();
-  return m.includes("projects") && m.includes(column.toLowerCase()) && m.includes("column");
+  if (m.includes("schema cache")) return false;
+  const col = column.toLowerCase();
+  if (!m.includes(col)) return false;
+  const looksLikeUndefinedColumn =
+    m.includes("does not exist") || m.includes("undefined column") || m.includes("42703");
+  if (!looksLikeUndefinedColumn) return false;
+  return (
+    m.includes("projects") || m.includes('relation "projects"') || m.includes("insert into projects")
+  );
 }
 
 function toNullableId(s: string | null | undefined): string | null {

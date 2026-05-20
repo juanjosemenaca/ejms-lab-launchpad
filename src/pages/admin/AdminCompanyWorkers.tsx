@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQueryClient, useQuery } from "@tanstack/react-query";
 import { Contact2, Plus, Pencil, Trash2, Search, Loader2, Filter } from "lucide-react";
 import { Card, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -13,25 +13,10 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { SearchableSelect } from "@/components/ui/searchable-select";
 import { SortableTableHead } from "@/components/admin/SortableTableHead";
 import { sortRows, toggleColumnSort, type ColumnSort } from "@/lib/adminListUtils";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
+import { DoubleConfirmAlertDialog } from "@/components/ui/double-confirm-alert-dialog";
 import { useCompanyWorkers } from "@/hooks/useCompanyWorkers";
 import { useProviders } from "@/hooks/useProviders";
 import { useWorkCalendarSites } from "@/hooks/useWorkCalendarSites";
@@ -40,6 +25,7 @@ import {
   updateCompanyWorker,
   deleteCompanyWorker,
 } from "@/api/companyWorkersApi";
+import { fetchCompanyWorkerIdsHavingCv } from "@/api/entityDocumentsApi";
 import { hasUsersLinkedToCompanyWorker } from "@/api/backofficeUsersApi";
 import { queryKeys } from "@/lib/queryKeys";
 import type { CompanyWorkerEmploymentType, CompanyWorkerRecord } from "@/types/companyWorkers";
@@ -51,6 +37,7 @@ import {
 import { WorkerFormDialog, type WorkerFormValues } from "@/components/admin/WorkerFormDialog";
 import { useToast } from "@/hooks/use-toast";
 import { useLanguage } from "@/contexts/LanguageContext";
+import { getWorkerCompleteness } from "@/lib/workerCompleteness";
 
 const AdminCompanyWorkers = () => {
   const queryClient = useQueryClient();
@@ -86,6 +73,22 @@ const AdminCompanyWorkers = () => {
     for (const s of calendarSites) m.set(s.id, s.name);
     return m;
   }, [calendarSites]);
+
+  const workerIdsFingerprint = useMemo(
+    () =>
+      workers
+        .map((w) => w.id)
+        .slice()
+        .sort()
+        .join(","),
+    [workers]
+  );
+
+  const { data: workerIdsWithCv = new Set<string>() } = useQuery({
+    queryKey: [...queryKeys.companyWorkers, "cv-presence", workerIdsFingerprint] as const,
+    queryFn: () => fetchCompanyWorkerIdsHavingCv(workers.map((w) => w.id)),
+    enabled: workers.length > 0,
+  });
 
   const filtered = useMemo(() => {
     let list = workers;
@@ -229,6 +232,26 @@ const AdminCompanyWorkers = () => {
     return null;
   };
 
+  const completenessMeta = (w: CompanyWorkerRecord) => {
+    const c = getWorkerCompleteness(w, { hasCvFile: workerIdsWithCv.has(w.id) });
+    if (c.level === "green") {
+      return {
+        dotClass: "bg-emerald-500",
+        label: t("admin.workers.completeness_green"),
+      };
+    }
+    if (c.level === "yellow") {
+      return {
+        dotClass: "bg-amber-400",
+        label: t("admin.workers.completeness_yellow"),
+      };
+    }
+    return {
+      dotClass: "bg-rose-500",
+      label: t("admin.workers.completeness_red"),
+    };
+  };
+
   if (isLoading) {
     return (
       <div className="flex items-center justify-center gap-2 py-16 text-muted-foreground">
@@ -291,56 +314,51 @@ const AdminCompanyWorkers = () => {
             </div>
             <div className="space-y-1 min-w-[150px]">
               <label className="text-xs text-muted-foreground">{t("admin.workers.filter_contract")}</label>
-              <Select
+              <SearchableSelect
                 value={employmentFilter}
                 onValueChange={(v) => setEmploymentFilter(v as "all" | CompanyWorkerEmploymentType)}
-              >
-                <SelectTrigger className="h-9">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">{t("admin.common.filter_all")}</SelectItem>
-                  {(Object.keys(COMPANY_WORKER_EMPLOYMENT_LABELS) as CompanyWorkerEmploymentType[]).map(
-                    (k) => (
-                      <SelectItem key={k} value={k}>
-                        {t(`admin.workers.emp.${k}`)}
-                      </SelectItem>
-                    )
-                  )}
-                </SelectContent>
-              </Select>
+                options={[
+                  { value: "all", label: t("admin.common.filter_all") },
+                  ...(Object.keys(COMPANY_WORKER_EMPLOYMENT_LABELS) as CompanyWorkerEmploymentType[]).map(
+                    (k) => ({ value: k, label: t(`admin.workers.emp.${k}`) })
+                  ),
+                ]}
+                searchable={false}
+                className="h-9"
+              />
             </div>
             <div className="space-y-1 min-w-[140px]">
               <label className="text-xs text-muted-foreground">{t("admin.common.status")}</label>
-              <Select value={activeFilter} onValueChange={(v) => setActiveFilter(v as typeof activeFilter)}>
-                <SelectTrigger className="h-9">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">{t("admin.common.filter_all")}</SelectItem>
-                  <SelectItem value="active">{t("admin.common.filter_active")}</SelectItem>
-                  <SelectItem value="inactive">{t("admin.common.filter_inactive")}</SelectItem>
-                </SelectContent>
-              </Select>
+              <SearchableSelect
+                value={activeFilter}
+                onValueChange={(v) => setActiveFilter(v as typeof activeFilter)}
+                options={[
+                  { value: "all", label: t("admin.common.filter_all") },
+                  { value: "active", label: t("admin.common.filter_active") },
+                  { value: "inactive", label: t("admin.common.filter_inactive") },
+                ]}
+                searchable={false}
+                className="h-9"
+              />
             </div>
             <div className="space-y-1 min-w-[200px] max-w-[260px]">
               <label className="text-xs text-muted-foreground">{t("admin.workers.filter_provider")}</label>
-              <Select value={providerFilter} onValueChange={setProviderFilter}>
-                <SelectTrigger className="h-9">
-                  <SelectValue placeholder={t("admin.common.filter_all")} />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">{t("admin.common.filter_all")}</SelectItem>
-                  <SelectItem value="__none__">{t("admin.workers.filter_provider_none")}</SelectItem>
-                  {providers
+              <SearchableSelect
+                value={providerFilter}
+                onValueChange={setProviderFilter}
+                options={[
+                  { value: "all", label: t("admin.common.filter_all") },
+                  { value: "__none__", label: t("admin.workers.filter_provider_none") },
+                  ...providers
                     .filter((p) => p.active)
-                    .map((p) => (
-                      <SelectItem key={p.id} value={p.id}>
-                        {p.tradeName}
-                      </SelectItem>
-                    ))}
-                </SelectContent>
-              </Select>
+                    .map((p) => ({
+                      value: p.id,
+                      label: p.tradeName,
+                    })),
+                ]}
+                placeholder={t("admin.common.filter_all")}
+                className="h-9"
+              />
             </div>
           </div>
         </CardHeader>
@@ -407,7 +425,19 @@ const AdminCompanyWorkers = () => {
                 {sorted.map((w) => (
                   <TableRow key={w.id}>
                     <TableCell className="font-medium">
-                      <div>{companyWorkerDisplayName(w)}</div>
+                      <div className="flex items-center gap-2">
+                        {(() => {
+                          const sem = completenessMeta(w);
+                          return (
+                            <span
+                              className={`inline-block h-3.5 w-3.5 rounded-full ${sem.dotClass} ring-1 ring-black/10 dark:ring-white/20 shrink-0`}
+                              title={sem.label}
+                              aria-label={sem.label}
+                            />
+                          );
+                        })()}
+                        <span>{companyWorkerDisplayName(w)}</span>
+                      </div>
                       <div className="text-xs text-muted-foreground">{w.city}</div>
                     </TableCell>
                     <TableCell className="font-mono text-sm">{w.dni}</TableCell>
@@ -478,28 +508,25 @@ const AdminCompanyWorkers = () => {
         providerOptions={providerOptions}
         calendarSites={calendarSites}
         onSubmit={handleFormSubmit}
+        onEntityDocumentsChanged={() => {
+          void queryClient.invalidateQueries({ queryKey: [...queryKeys.companyWorkers, "cv-presence"] });
+        }}
       />
 
-      <AlertDialog open={!!deleteTarget} onOpenChange={() => setDeleteTarget(null)}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>{t("admin.workers.delete_title")}</AlertDialogTitle>
-            <AlertDialogDescription>
-              {t("admin.workers.delete_desc")}{" "}
-              <strong>{deleteTarget ? companyWorkerDisplayName(deleteTarget) : ""}</strong>.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>{t("admin.common.cancel")}</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={() => void confirmDelete()}
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-            >
-              {t("admin.common.delete")}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      <DoubleConfirmAlertDialog
+        open={!!deleteTarget}
+        onOpenChange={(o) => {
+          if (!o) setDeleteTarget(null);
+        }}
+        onConfirm={() => void confirmDelete()}
+        title={t("admin.workers.delete_title")}
+        description={
+          <>
+            {t("admin.workers.delete_desc")}{" "}
+            <strong>{deleteTarget ? companyWorkerDisplayName(deleteTarget) : ""}</strong>.
+          </>
+        }
+      />
     </div>
   );
 };
