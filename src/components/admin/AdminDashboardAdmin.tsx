@@ -51,21 +51,29 @@ function fillKpiTemplate(template: string, vars: Record<string, string | number>
   );
 }
 
-/** Escala de grises por barra (gráfico 3 meses facturación panel admin). */
-const DASHBOARD_BILLING_BAR_COLORS = [
-  "#171717",
-  "#262626",
-  "#404040",
-  "#525252",
-  "#737373",
-  "#a3a3a3",
-  "#1c1917",
-  "#292524",
-  "#44403c",
-  "#57534e",
-  "#78716c",
-  "#a8a29e",
-] as const;
+/**
+ * Paleta de barras alineada con la marca web (`--primary`, `--accent`, tokens `--inorme-orange-*`).
+ * Misma familia cromática que `.text-gradient-orange` en `index.css`.
+ */
+const DASHBOARD_BILLING_BAR_COLOR_STOPS: readonly [h: number, s: number, l: number][] = [
+  [262, 66, 62],
+  [256, 82, 68],
+  [256, 82, 74],
+  [252, 85, 78],
+  [249, 88, 82],
+  [240, 88, 78],
+  [230, 89, 77],
+  [220, 90, 76],
+  [209, 90, 76],
+  [209, 88, 72],
+  [256, 78, 70],
+  [262, 66, 65],
+];
+
+function dashboardBillingBarFill(index: number): string {
+  const [h, s, l] = DASHBOARD_BILLING_BAR_COLOR_STOPS[index % DASHBOARD_BILLING_BAR_COLOR_STOPS.length];
+  return `hsl(${h}, ${s}%, ${l}%)`;
+}
 
 function countProjectsOngoing(projects: { endDate: string }[]): number {
   const today = new Date().toISOString().slice(0, 10);
@@ -274,38 +282,43 @@ export function AdminDashboardAdmin({ session }: Props) {
     [billingInvoices]
   );
 
-  /** Comparativa rápida: importe emitido por mes natural (últimos 3 meses). */
-  const billingLast3MonthsBarData = useMemo(() => {
+/** Serie YTD: enero → mes actual (importe emitido por mes natural, año actual). */
+const billingYearToDateBarData = useMemo(() => {
     const unk = t("admin.billing.group_month_unknown");
-    const mkLabel = (ym: string) =>
-      formatInvoiceMonthHeading(localeTag, Number(ym.slice(0, 4)), Number(ym.slice(5, 7)), unk);
-    return [
-      {
-        key: billingYmMinus2,
-        label: mkLabel(billingYmMinus2),
-        total: billingAggMinus2.total,
-        count: billingAggMinus2.count,
-      },
-      {
-        key: billingYmPrevious,
-        label: mkLabel(billingYmPrevious),
-        total: billingAggPrev.total,
-        count: billingAggPrev.count,
-      },
-      {
-        key: billingYmCurrent,
-        label: mkLabel(billingYmCurrent),
-        total: billingAggCurrent.total,
-        count: billingAggCurrent.count,
-      },
-    ];
+  const [yearNow, monthNow] = billingTodayYmd.split("-").map(Number);
+  const monthTotals = new Map<string, { total: number; count: number }>();
+
+  for (const inv of billingInvoices) {
+    if (!isEffectiveIssued(inv)) continue;
+    const ymd = billingInvoiceComparableYmd(inv);
+    if (ymd != null && ymd > billingTodayYmd) continue;
+    const { y, m } = issuedGroupYearMonth(inv);
+    if (y !== yearNow || m < 1 || m > monthNow) continue;
+    const ym = `${y}-${String(m).padStart(2, "0")}`;
+    const current = monthTotals.get(ym) ?? { total: 0, count: 0 };
+    current.total += Number(inv.grandTotal) || 0;
+    current.count += 1;
+    monthTotals.set(ym, current);
+  }
+
+  return Array.from({ length: monthNow }, (_, i) => {
+    const m = i + 1;
+    const ym = `${yearNow}-${String(m).padStart(2, "0")}`;
+    const heading = formatInvoiceMonthHeading(localeTag, yearNow, m, unk);
+    const dt = new Date(yearNow, m - 1, 1);
+    const tickLabel = dt.toLocaleDateString(localeTag, { month: "short" });
+    const agg = monthTotals.get(ym) ?? { total: 0, count: 0 };
+    return {
+      key: ym,
+      label: heading,
+      tickLabel,
+      total: Math.round(agg.total * 100) / 100,
+      count: agg.count,
+    };
+  });
   }, [
-    billingYmMinus2,
-    billingYmPrevious,
-    billingYmCurrent,
-    billingAggMinus2,
-    billingAggPrev,
-    billingAggCurrent,
+  billingInvoices,
+  billingTodayYmd,
     localeTag,
     t,
   ]);
@@ -590,9 +603,9 @@ export function AdminDashboardAdmin({ session }: Props) {
                     </p>
                     <div className="mt-3 h-[220px] w-full">
                       <ResponsiveContainer width="100%" height="100%">
-                        <BarChart data={billingLast3MonthsBarData} margin={{ top: 8, right: 12, left: 4, bottom: 8 }}>
-                          <CartesianGrid strokeDasharray="3 3" className="stroke-border/60" vertical={false} />
-                          <XAxis dataKey="label" tick={{ fontSize: 11 }} interval={0} height={48} />
+                        <BarChart data={billingYearToDateBarData} margin={{ top: 8, right: 12, left: 4, bottom: 8 }}>
+                          <CartesianGrid strokeDasharray="3 3" stroke="hsl(236, 38%, 90%)" vertical={false} />
+                          <XAxis dataKey="tickLabel" tick={{ fontSize: 11 }} interval={0} height={48} />
                           <YAxis tick={{ fontSize: 10 }} width={56} tickFormatter={(v) => formatEuroAxis.format(Number(v))} />
                           <Tooltip
                             cursor={{ fill: "hsl(var(--muted))", opacity: 0.35 }}
@@ -619,8 +632,8 @@ export function AdminDashboardAdmin({ session }: Props) {
                             }}
                           />
                           <Bar dataKey="total" radius={[4, 4, 0, 0]} maxBarSize={56}>
-                            {billingLast3MonthsBarData.map((entry, i) => (
-                              <Cell key={entry.key} fill={DASHBOARD_BILLING_BAR_COLORS[i % DASHBOARD_BILLING_BAR_COLORS.length]} />
+                            {billingYearToDateBarData.map((entry, i) => (
+                              <Cell key={entry.key} fill={dashboardBillingBarFill(i)} />
                             ))}
                           </Bar>
                         </BarChart>
