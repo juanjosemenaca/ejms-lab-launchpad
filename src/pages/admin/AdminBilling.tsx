@@ -521,14 +521,20 @@ const AdminBilling = () => {
   );
   const draftInvoices = useMemo(() => invoices.filter((i) => i.status === "DRAFT"), [invoices]);
   const draftInvoicesDisplayed = useMemo(() => {
-    if (!invoiceListDraftYm || !/^\d{4}-\d{2}$/.test(invoiceListDraftYm)) return draftInvoices;
-    const ys = Number(invoiceListDraftYm.slice(0, 4));
-    const ms = Number(invoiceListDraftYm.slice(5, 7));
-    return draftInvoices.filter((inv) => {
-      const { y, m } = draftGroupYearMonth(inv);
-      return y === ys && m === ms;
-    });
-  }, [draftInvoices, invoiceListDraftYm]);
+    let list = draftInvoices;
+    if (invoiceListDraftYm && /^\d{4}-\d{2}$/.test(invoiceListDraftYm)) {
+      const ys = Number(invoiceListDraftYm.slice(0, 4));
+      const ms = Number(invoiceListDraftYm.slice(5, 7));
+      list = list.filter((inv) => {
+        const { y, m } = draftGroupYearMonth(inv);
+        return y === ys && m === ms;
+      });
+    }
+    if (issuedIssuerIdFilter !== "all") {
+      list = list.filter((inv) => inv.issuerId === issuedIssuerIdFilter);
+    }
+    return list;
+  }, [draftInvoices, invoiceListDraftYm, issuedIssuerIdFilter]);
   const issuedInvoices = useMemo(() => invoices.filter((i) => i.status !== "DRAFT"), [invoices]);
   /** Facturas del cliente con al menos una línea (emitidas, cobradas o borradores), para reutilizar conceptos/importes. */
   const invoicesForNewDraftLineCopy = useMemo(() => {
@@ -650,8 +656,9 @@ const AdminBilling = () => {
     const tab = searchParams.get("tab");
     const period = searchParams.get("period");
     const collectionRaw = searchParams.get("collection");
+    const issuerRaw = searchParams.get("issuer");
     const hasAny =
-      tab !== null || period !== null || collectionRaw !== null;
+      tab !== null || period !== null || collectionRaw !== null || (issuerRaw != null && issuerRaw !== "");
 
     if (!hasAny) return;
 
@@ -670,6 +677,10 @@ const AdminBilling = () => {
       setIssuedCollectionFilter("outstanding");
     } else {
       setIssuedCollectionFilter("all");
+    }
+
+    if (issuerRaw) {
+      setIssuedIssuerIdFilter(issuerRaw);
     }
 
     if (period && /^\d{4}-\d{2}$/.test(period)) {

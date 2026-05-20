@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { Bar, BarChart, CartesianGrid, Cell, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import {
@@ -18,6 +18,8 @@ import {
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Label } from "@/components/ui/label";
+import { SearchableSelect } from "@/components/ui/searchable-select";
 import { BackofficeTodayDateCard } from "@/components/admin/BackofficeTodayDateCard";
 import { useMyBackofficeMessages } from "@/hooks/useBackofficeMessages";
 import { useMyDmsDocumentReviewsAsAssignee } from "@/hooks/useMyDmsDocumentReviews";
@@ -34,7 +36,7 @@ import {
   billingInvoiceOutstandingAmount,
 } from "@/lib/billingCollectionSemaphore";
 import { draftGroupYearMonth, formatInvoiceMonthHeading, issuedGroupYearMonth } from "@/lib/billingInvoiceGroups";
-import { useBillingInvoices } from "@/hooks/useBilling";
+import { useBillingInvoices, useBillingIssuers } from "@/hooks/useBilling";
 import type { BillingInvoiceRecord } from "@/types/billing";
 import { useClients } from "@/hooks/useClients";
 import { useCompanyWorkers } from "@/hooks/useCompanyWorkers";
@@ -139,6 +141,28 @@ function isEffectiveIssued(inv: BillingInvoiceRecord): boolean {
   return inv.status !== "DRAFT" && inv.status !== "CANCELLED";
 }
 
+function filterBillingInvoicesByIssuer(
+  invoices: BillingInvoiceRecord[],
+  issuerId: string
+): BillingInvoiceRecord[] {
+  if (issuerId === "all") return invoices;
+  return invoices.filter((inv) => inv.issuerId === issuerId);
+}
+
+function buildFacturacionDashboardLink(opts: {
+  tab: "drafts" | "issued";
+  period?: string;
+  collection?: "all" | "outstanding";
+  issuerId?: string;
+}): string {
+  const params = new URLSearchParams();
+  params.set("tab", opts.tab);
+  if (opts.period) params.set("period", opts.period);
+  if (opts.collection) params.set("collection", opts.collection);
+  if (opts.issuerId && opts.issuerId !== "all") params.set("issuer", opts.issuerId);
+  return `/admin/facturacion?${params.toString()}`;
+}
+
 function aggregateEffectiveIssuedYm(invoices: BillingInvoiceRecord[], ym: string): { count: number; total: number } {
   if (!/^\d{4}-\d{2}$/.test(ym)) return { count: 0, total: 0 };
   const ys = Number(ym.slice(0, 4));
@@ -165,26 +189,46 @@ export function AdminDashboardAdmin({ session }: Props) {
   const { data: clients = [], isPending: clientsOverviewPending } = useClients();
   const { data: projects = [], isPending: projectsOverviewPending } = useProjects();
   const { data: billingInvoices = [], isPending: billingOverviewPending } = useBillingInvoices(supabaseOk);
+  const { data: billingIssuers = [], isPending: billingIssuersPending } = useBillingIssuers(supabaseOk);
+  const [dashboardBillingIssuerId, setDashboardBillingIssuerId] = useState("all");
+
+  const billingInvoicesForDashboard = useMemo(
+    () => filterBillingInvoicesByIssuer(billingInvoices, dashboardBillingIssuerId),
+    [billingInvoices, dashboardBillingIssuerId]
+  );
+
+  const billingIssuerSelectOptions = useMemo(
+    () => [
+      { value: "all", label: t("admin.common.filter_all") },
+      ...[...billingIssuers]
+        .sort((a, b) => a.code.localeCompare(b.code, undefined, { sensitivity: "base" }))
+        .map((i) => ({
+          value: i.id,
+          label: `${i.code} · ${i.legalName}`,
+        })),
+    ],
+    [billingIssuers, t]
+  );
 
   const billingYmCurrent = calendarYmShift(0);
   const billingYmPrevious = calendarYmShift(-1);
   const billingYmMinus2 = calendarYmShift(-2);
 
   const billingDraftsThisMonth = useMemo(
-    () => countBillingDraftsYm(billingInvoices, billingYmCurrent),
-    [billingInvoices, billingYmCurrent]
+    () => countBillingDraftsYm(billingInvoicesForDashboard, billingYmCurrent),
+    [billingInvoicesForDashboard, billingYmCurrent]
   );
   const billingAggMinus2 = useMemo(
-    () => aggregateEffectiveIssuedYm(billingInvoices, billingYmMinus2),
-    [billingInvoices, billingYmMinus2]
+    () => aggregateEffectiveIssuedYm(billingInvoicesForDashboard, billingYmMinus2),
+    [billingInvoicesForDashboard, billingYmMinus2]
   );
   const billingAggPrev = useMemo(
-    () => aggregateEffectiveIssuedYm(billingInvoices, billingYmPrevious),
-    [billingInvoices, billingYmPrevious]
+    () => aggregateEffectiveIssuedYm(billingInvoicesForDashboard, billingYmPrevious),
+    [billingInvoicesForDashboard, billingYmPrevious]
   );
   const billingAggCurrent = useMemo(
-    () => aggregateEffectiveIssuedYm(billingInvoices, billingYmCurrent),
-    [billingInvoices, billingYmCurrent]
+    () => aggregateEffectiveIssuedYm(billingInvoicesForDashboard, billingYmCurrent),
+    [billingInvoicesForDashboard, billingYmCurrent]
   );
 
   const overviewPending =
@@ -273,22 +317,22 @@ export function AdminDashboardAdmin({ session }: Props) {
   }, [billingTodayYmd, localeTag]);
 
   const billingGrandTotalToDate = useMemo(
-    () => sumIssuedGrandTotalUpToDate(billingInvoices, billingTodayYmd),
-    [billingInvoices, billingTodayYmd]
+    () => sumIssuedGrandTotalUpToDate(billingInvoicesForDashboard, billingTodayYmd),
+    [billingInvoicesForDashboard, billingTodayYmd]
   );
 
   const billingPendingCollection = useMemo(
-    () => billingOutstandingCollectPending(billingInvoices),
-    [billingInvoices]
+    () => billingOutstandingCollectPending(billingInvoicesForDashboard),
+    [billingInvoicesForDashboard]
   );
 
-/** Serie YTD: enero → mes actual (importe emitido por mes natural, año actual). */
-const billingYearToDateBarData = useMemo(() => {
+  /** Serie YTD: enero → mes actual (importe emitido por mes natural, año actual). */
+  const billingYearToDateBarData = useMemo(() => {
     const unk = t("admin.billing.group_month_unknown");
-  const [yearNow, monthNow] = billingTodayYmd.split("-").map(Number);
-  const monthTotals = new Map<string, { total: number; count: number }>();
+    const [yearNow, monthNow] = billingTodayYmd.split("-").map(Number);
+    const monthTotals = new Map<string, { total: number; count: number }>();
 
-  for (const inv of billingInvoices) {
+    for (const inv of billingInvoicesForDashboard) {
     if (!isEffectiveIssued(inv)) continue;
     const ymd = billingInvoiceComparableYmd(inv);
     if (ymd != null && ymd > billingTodayYmd) continue;
@@ -316,12 +360,7 @@ const billingYearToDateBarData = useMemo(() => {
       count: agg.count,
     };
   });
-  }, [
-  billingInvoices,
-  billingTodayYmd,
-    localeTag,
-    t,
-  ]);
+  }, [billingInvoicesForDashboard, billingTodayYmd, localeTag, t]);
 
   const showAssignedDocsCard =
     fetchPending && !docsPending && pendingAssignedDocsCount > 0;
@@ -440,7 +479,7 @@ const billingYearToDateBarData = useMemo(() => {
           </div>
           )}
           {!overviewPending ? (
-            billingOverviewPending ? (
+            billingOverviewPending || billingIssuersPending ? (
               <Card className="flex flex-col border-2 shadow-sm">
                 <CardContent className="flex items-center gap-2 py-8 text-muted-foreground">
                   <Loader2 className="h-5 w-5 shrink-0 animate-spin" aria-hidden />
@@ -457,6 +496,14 @@ const billingYearToDateBarData = useMemo(() => {
                     </CardTitle>
                   </div>
                   <CardDescription>{t("admin.dashboard.admin_billing_section_hint")}</CardDescription>
+                  <div className="mt-3 max-w-md space-y-1.5">
+                    <Label>{t("admin.dashboard.admin_billing_issuer_filter_label")}</Label>
+                    <SearchableSelect
+                      value={dashboardBillingIssuerId}
+                      onValueChange={setDashboardBillingIssuerId}
+                      options={billingIssuerSelectOptions}
+                    />
+                  </div>
                 </CardHeader>
                 <CardContent className="space-y-6">
                   <div className="flex flex-col gap-3 sm:grid sm:grid-cols-2 sm:items-stretch sm:gap-x-4 sm:gap-y-0">
@@ -488,7 +535,11 @@ const billingYearToDateBarData = useMemo(() => {
                       </dl>
                       <div className="mt-3 space-y-2.5">
                         <Link
-                          to={`/admin/facturacion?tab=drafts&period=${encodeURIComponent(billingYmCurrent)}`}
+                          to={buildFacturacionDashboardLink({
+                            tab: "drafts",
+                            period: billingYmCurrent,
+                            issuerId: dashboardBillingIssuerId,
+                          })}
                           className={cn(
                             "flex flex-col gap-2 rounded-md border border-green-200/80 bg-white/70 px-3 py-2.5 outline-none ring-offset-background transition-colors hover:bg-white/95 focus-visible:ring-2 focus-visible:ring-ring dark:border-emerald-800/50 dark:bg-emerald-950/50 dark:hover:bg-emerald-950/70"
                           )}
@@ -504,7 +555,11 @@ const billingYearToDateBarData = useMemo(() => {
                           </span>
                         </Link>
                         <Link
-                          to={`/admin/facturacion?tab=issued&period=${encodeURIComponent(billingYmCurrent)}`}
+                          to={buildFacturacionDashboardLink({
+                            tab: "issued",
+                            period: billingYmCurrent,
+                            issuerId: dashboardBillingIssuerId,
+                          })}
                           className={cn(
                             "flex flex-col gap-2 rounded-md border border-green-200/80 bg-white/70 px-3 py-2.5 outline-none ring-offset-background transition-colors hover:bg-white/95 focus-visible:ring-2 focus-visible:ring-ring dark:border-emerald-800/50 dark:bg-emerald-950/50 dark:hover:bg-emerald-950/70"
                           )}
@@ -552,7 +607,11 @@ const billingYearToDateBarData = useMemo(() => {
                           </dl>
                         </div>
                         <Link
-                          to={`/admin/facturacion?tab=issued&period=${encodeURIComponent(billingYmMinus2)}`}
+                          to={buildFacturacionDashboardLink({
+                            tab: "issued",
+                            period: billingYmMinus2,
+                            issuerId: dashboardBillingIssuerId,
+                          })}
                           className={cn(buttonVariants({ variant: "outline", size: "sm" }), "mt-auto h-9 w-full shrink-0 text-sm")}
                         >
                           {t("admin.dashboard.admin_dashboard_billing_open")}
@@ -588,7 +647,11 @@ const billingYearToDateBarData = useMemo(() => {
                           </dl>
                         </div>
                         <Link
-                          to={`/admin/facturacion?tab=issued&period=${encodeURIComponent(billingYmPrevious)}`}
+                          to={buildFacturacionDashboardLink({
+                            tab: "issued",
+                            period: billingYmPrevious,
+                            issuerId: dashboardBillingIssuerId,
+                          })}
                           className={cn(buttonVariants({ variant: "outline", size: "sm" }), "mt-auto h-9 w-full shrink-0 text-sm")}
                         >
                           {t("admin.dashboard.admin_dashboard_billing_open")}
@@ -644,7 +707,11 @@ const billingYearToDateBarData = useMemo(() => {
                   <div className="rounded-lg border border-border/80 px-4 py-4">
                     <div className="grid gap-3 sm:grid-cols-2">
                       <Link
-                        to="/admin/facturacion?tab=issued&collection=all"
+                        to={buildFacturacionDashboardLink({
+                          tab: "issued",
+                          collection: "all",
+                          issuerId: dashboardBillingIssuerId,
+                        })}
                         className={cn(
                           "flex min-w-0 flex-col gap-2 rounded-md border border-border/50 bg-muted/10 px-3 py-3 outline-none ring-offset-background transition-colors hover:bg-muted/20 focus-visible:ring-2 focus-visible:ring-ring"
                         )}
@@ -665,7 +732,11 @@ const billingYearToDateBarData = useMemo(() => {
                       </Link>
 
                       <Link
-                        to="/admin/facturacion?tab=issued&collection=outstanding"
+                        to={buildFacturacionDashboardLink({
+                          tab: "issued",
+                          collection: "outstanding",
+                          issuerId: dashboardBillingIssuerId,
+                        })}
                         className={cn(
                           "flex min-w-0 flex-col gap-2 rounded-md border border-border/50 bg-muted/10 px-3 py-3 outline-none ring-offset-background transition-colors hover:bg-muted/20 focus-visible:ring-2 focus-visible:ring-ring"
                         )}
